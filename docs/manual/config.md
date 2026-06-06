@@ -9,10 +9,12 @@
 - `selectModel(models, id?)` picks by id, else the `default` entry, else the first.
 - `providerFor(entry)` returns the `Provider` and checks its key in `Bun.env` — `deepseek` is wired;
   `gemini` is `null` (nerve's first self-hosted task, [D11](../DECISIONS.md)) and throws a clear error.
-- `index.ts` (the kernel runner) boots: `loadModels → selectModel → providerFor`, builds a `Session`
+- `index.ts` (the kernel runner) boots: **`preflight()`** (exit if a required external dep — the shell
+  or `git` — is missing on PATH) → `loadModels → selectModel → providerFor`, builds a `Session`
   (or resumes), reads `prompts/system.md`, and drives `loop` — one-shot with `-p "…"` or a stdin REPL,
   streaming to stdout (reasoning dimmed). Flags: `-p/--print`, `--model <id>`, `--mode plan|edit`
-  (default edit), `--resume <id>|last`. Kernel default: `thinking` off ([D11](../DECISIONS.md)).
+  (default edit), `--resume <id>|last`. `--resume last` = newest session by mtime (`src/sessions.ts`).
+  Kernel default: `thinking` off ([D11](../DECISIONS.md)).
 
 **How to change it:**
 - Add a model → edit `config/models.json` (+ its schema); no code change.

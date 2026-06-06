@@ -2,7 +2,7 @@
 // renders assistant output as markdown, an autosuggest/ask popup with row highlighting, a bordered
 // input, and a styled status bar (model · mode · cost · context · balance). Affordances: @file, !shell,
 // /command + an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
-import { unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   createCliRenderer,
@@ -24,12 +24,15 @@ import {
 import { loop } from "../loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
-import { selectModel, providerFor, type ModelEntry } from "../config.ts";
+import { selectModel, providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
+import { expandCommand, type Command } from "../commands.ts";
+import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
+import { listSessions, lastSessionId, SESSIONS_DIR } from "../sessions.ts";
 import type { Mode } from "../dispatch.ts";
-import type { Provider, ToolSpec } from "../providers/types.ts";
+import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest } from "../tools/types.ts";
 import { Session } from "../session.ts";
 
@@ -76,9 +79,9 @@ const syntaxStyle = SyntaxStyle.fromStyles({
 type Content = string | ReturnType<typeof t>;
 
 const HELP = [
-  "commands  /help · /model [id] · /mode plan|edit · /clear · /drop · /balance · /resume · /quit",
+  "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Tab accept · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
+  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
 ].join("\n");
 
 export interface TuiOptions {
@@ -91,6 +94,8 @@ export interface TuiOptions {
   system: string;
   tools: ToolSpec[];
   skills: CommandInfo[];
+  commands: Command[];
+  compactionPrompt: string;
 }
 
 interface Suggestion {
@@ -108,7 +113,8 @@ interface PopupRow {
 export async function runTui(opts: TuiOptions): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30 });
   renderer.setBackgroundColor(DARKFG);
-  const { models, cwd, system, tools, skills } = opts;
+  const { models, cwd, system, tools, skills, commands, compactionPrompt } = opts;
+  const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
 
   let active = opts.entry;
   let provider = opts.provider;
@@ -185,6 +191,24 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     for (const id of lineIds) transcript.remove(id);
     lineIds.length = 0;
   };
+  // Replay loaded messages into the transcript (for /resume). Reasoning isn't replayed (telemetry only).
+  const renderHistory = (messages: Message[]): void => {
+    for (const m of messages) {
+      if (m.role === "user") {
+        spacer();
+        addText(t`${bold(fg(GREEN)("❯"))} ${m.content}`);
+      } else if (m.role === "assistant") {
+        if (m.content) {
+          const md = addMarkdown();
+          md.content = m.content;
+          md.streaming = false;
+        }
+        for (const tc of m.toolCalls ?? []) addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(tc.name)}`);
+      } else if (m.role === "tool") {
+        addText(t`${fg(DIM)("⎿")} ${fg(DIM)(firstLine(m.content))}`);
+      }
+    }
+  };
 
   // --- popup (autosuggest + ask picker, with row highlight) -----------------
   // A fixed pool of row renderables we UPDATE in place (never recreate) — recreating with reused ids
@@ -235,7 +259,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const paths = await atSuggestions(aff.query, cwd);
       suggest = { kind: "at", items: paths.map((p) => ({ name: p, insert: p })), sel: 0 };
     } else if (aff.kind === "slash") {
-      const cmds = slashSuggestions(aff.query, skills).slice(0, MAX_POPUP);
+      const cmds = slashSuggestions(aff.query, slashExtra).slice(0, MAX_POPUP);
       suggest = { kind: "slash", items: cmds.map((c) => ({ name: `/${c.name}`, desc: c.description, insert: c.name })), sel: 0 };
     } else {
       suggest = { kind: "none", items: [], sel: 0 };
@@ -275,6 +299,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? fg(YELLOW)("   ● streaming") : ""}`;
   };
 
+  const toggleMode = (): void => {
+    mode = mode === "plan" ? "edit" : "plan";
+    setStatus();
+    addText(`mode → ${mode.toUpperCase()}`, MUTE);
+  };
+
   // --- actions --------------------------------------------------------------
   async function refreshBalance(): Promise<void> {
     const key = active.provider === "deepseek" ? Bun.env.DEEPSEEK_API_KEY : Bun.env.GEMINI_API_KEY;
@@ -297,11 +327,39 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
   }
 
+  // D17: summarize old turns into one message to reclaim context. Manual for now; ESC cancels.
+  const KEEP_TOKENS = 20_000;
+  async function compact(focus: string): Promise<void> {
+    if (busy) return;
+    const cut = pickCutPoint(session.messages, KEEP_TOKENS);
+    if (cut < 2) {
+      addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)("nothing old enough to compact yet")}`);
+      return;
+    }
+    busy = true;
+    setStatus();
+    const note = addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)("compacting…")}`);
+    turnAbort = new AbortController();
+    try {
+      const input = pruneToolOutputs(session.messages.slice(0, cut)).messages; // shrink the summarizer's input
+      const keep = session.messages.length - cut;
+      const summary = await summarize(provider, active.id, input, compactionPrompt, focus, turnAbort.signal);
+      session.compact(summary, keep);
+      note.content = t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`;
+    } catch (e) {
+      note.content = t`${fg(RED)("✗")} ${fg(MUTE)(`compaction failed: ${e instanceof Error ? e.message : String(e)}`)}`;
+    } finally {
+      busy = false;
+      turnAbort = null;
+      setStatus();
+    }
+  }
+
   async function drop(): Promise<void> {
     const old = session.id;
     await session.close();
     try {
-      unlinkSync(join(".nerve", "sessions", `${old}.jsonl`));
+      unlinkSync(join(SESSIONS_DIR, `${old}.jsonl`));
     } catch {
       /* already gone */
     }
@@ -312,17 +370,59 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     setStatus();
   }
 
+  // /resume [id] — switch to an existing session (default: the most recent one that isn't this one).
+  async function resumeSession(idArg?: string): Promise<void> {
+    if (busy) return;
+    const id = idArg ?? lastSessionId(SESSIONS_DIR, session.id);
+    if (!id) return void addText("no other session to resume", MUTE);
+    if (!existsSync(join(SESSIONS_DIR, `${id}.jsonl`))) return void addText(`✗ no session '${id}'`, RED);
+    await session.close();
+    session = new Session({ id, resume: true });
+    meter = new UsageMeter();
+    clearTranscript();
+    renderHistory(session.messages);
+    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id} · ${session.messages.length} message(s) in context`)}`);
+    setStatus();
+  }
+
+  // /sessions — list sessions; /sessions delete <id> removes one (not the current — that's /drop).
+  function sessionsCommand(args: string[]): void {
+    const sub = args[0];
+    if (sub === "delete" || sub === "rm") {
+      const id = args[1];
+      if (!id) return void addText("usage: /sessions delete <id>", MUTE);
+      if (id === session.id) return void addText("✗ that's the current session — use /drop", RED);
+      try {
+        unlinkSync(join(SESSIONS_DIR, `${id}.jsonl`));
+        addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
+      } catch {
+        addText(`✗ no session '${id}'`, RED);
+      }
+      return;
+    }
+    const list = listSessions();
+    if (!list.length) return void addText("no sessions yet", MUTE);
+    addText(t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
+    for (const s of list) {
+      const cur = s.id === session.id;
+      addText(t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(DIM)(trunc(s.preview, Math.max(16, renderer.width - 52)))}`);
+    }
+  }
+
   async function runCommand(value: string): Promise<void> {
     const { name, args } = parseSlash(value);
     switch (name) {
       case "help":
         addText(HELP, MUTE);
         return;
+      case "exit":
       case "quit":
         return void shutdown();
       case "clear":
         clearTranscript();
         return;
+      case "compact":
+        return void compact(args.join(" "));
       case "drop":
         return void drop();
       case "mode": {
@@ -356,10 +456,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         addText(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, MUTE);
         return;
       case "resume":
-        addText("resume is a launch flag: bun index.ts --resume <id>|last", MUTE);
-        return;
-      default:
+        return void resumeSession(args[0]);
+      case "sessions":
+        return void sessionsCommand(args);
+      default: {
+        // D16: a markdown command file → expand its body and submit it as a prompt.
+        const cmd = commands.find((c) => c.name === name);
+        if (cmd) return void submit(expandCommand(cmd.body, args));
         addText(skills.some((s) => s.name === name) ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")` : `unknown command: /${name} (try /help)`, MUTE);
+      }
     }
   }
 
@@ -377,7 +482,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
     let reasoningLine: TextRenderable | null = null;
-    const answer = addMarkdown();
+    let answer = addMarkdown();
     turnAbort = new AbortController();
     try {
       await loop({
@@ -399,6 +504,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         tools,
         thinking: active.thinking ?? false,
         temperature: active.temperature,
+        fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder
         onEvent: (ev) => {
           if (ev.type === "text") answer.content += ev.delta;
           else if (ev.type === "usage") {
@@ -407,6 +513,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           }
         },
         onToolResult: (name, result) => addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`),
+        onRetry: ({ delayMs, model }) => {
+          transcript.remove(answer.id); // drop the failed (usually empty) attempt
+          reasoningLine = null;
+          addText(t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
+          answer = addMarkdown(); // fresh block for the retried attempt
+        },
+        onError: (e) => addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED),
       });
     } catch (e) {
       addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
@@ -439,7 +552,24 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     void updateSuggestions(value);
   });
   input.on(InputRenderableEvents.ENTER, (value: string) => {
-    if (!asking) void submit(value);
+    if (asking) return;
+    if (suggestOpen()) {
+      const it = suggest.items[suggest.sel];
+      // Slash popup → run the highlighted command (no Tab needed). e.g. `/ex`↵ → /exit.
+      if (it && suggest.kind === "slash") return void submit(`/${it.insert}`);
+      // @-popup → accept the highlighted path. A directory drills in (don't send); a file sends.
+      if (it && suggest.kind === "at") {
+        const next = applyAtSuggestion(input.value, it.insert);
+        if (it.insert.endsWith("/")) {
+          echoGuard = next;
+          input.value = next;
+          void updateSuggestions(next);
+          return;
+        }
+        return void submit(next);
+      }
+    }
+    void submit(value);
   });
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
@@ -461,11 +591,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       return;
     }
 
-    if (key.shift && key.name === "tab") {
-      mode = mode === "plan" ? "edit" : "plan";
-      setStatus();
-      return;
-    }
+    if (key.shift && key.name === "tab") return void toggleMode(); // Shift+Tab toggles mode (even over a popup)
     if (suggestOpen()) {
       if (key.name === "up") {
         suggest.sel = Math.max(0, suggest.sel - 1);
@@ -486,6 +612,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return;
       }
     }
+    if (key.name === "tab") return void toggleMode(); // plain Tab with no popup also toggles the mode
     if (key.name === "escape") turnAbort?.abort();
   });
 
@@ -501,4 +628,12 @@ function firstLine(s: string): string {
 
 function trunc(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+
+function rel(ms: number): string {
+  const s = Math.max(0, Date.now() - ms) / 1000;
+  if (s < 60) return `${Math.floor(s)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }

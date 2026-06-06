@@ -21,8 +21,11 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "model", description: "Switch model — /model <id>" },
   { name: "mode", description: "Set mode — /mode plan|edit" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
+  { name: "compact", description: "Summarize old turns to free up context — /compact [focus]" },
   { name: "drop", description: "Delete this session and start a fresh one" },
-  { name: "resume", description: "Resume is a launch flag — --resume <id>|last" },
+  { name: "resume", description: "Resume last session (or /resume <id>)" },
+  { name: "sessions", description: "List sessions; /sessions delete <id>" },
+  { name: "exit", description: "Exit nerve" },
   { name: "quit", description: "Exit nerve" },
 ];
 

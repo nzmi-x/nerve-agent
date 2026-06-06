@@ -19,15 +19,28 @@
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode plan|edit /clear /drop /balance /resume /quit` + skill listing.
+- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /sessions /resume [id] /drop /balance /quit` + skill listing
+  + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
+  `<name>.md` under `~/.claude/commands`, `./.claude/commands`, or `./.nerve/commands` expands its body
+  (`$1`/`$@`/`$ARGUMENTS` substitution) and submits it as a prompt. A built-in name always wins.
 - **`ask_user`:** the loop's `ctx.ask` opens an interactive picker (↑/↓ + Enter) in the popup and
   blocks the turn until you choose; the recommended option is preselected.
-- **Keys:** Enter send · **Tab accept suggestion** · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit.
+- **Sessions:** `/resume [id]` closes the current session and reloads an existing one (default = most
+  recent that isn't current), replaying its messages into the transcript (`renderHistory`). `/sessions`
+  lists them (id · #msgs · age · first-message preview, current marked ●); `/sessions delete <id>`
+  removes one (refuses the current — use `/drop`). Discovery via `src/sessions.ts`.
+- **Keys:** Enter with a popup open **accepts the highlighted suggestion** before acting — a `/`
+  command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
+  and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
+  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit.
+  (`/exit` aliases `/quit`.)
 
 **How to change it:**
 - The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;
   `app.ts` only renders + routes keys. For the OpenTUI API, `manual("opentui")`.
-- New `/command` → add to `BUILTIN_COMMANDS` (affordances) + a `case` in `runCommand`.
+- New built-in `/command` → add to `BUILTIN_COMMANDS` (affordances) + a `case` in `runCommand`.
+- New *file* command → drop a `<name>.md` in `./.nerve/commands` (or `./.claude/commands`); no code
+  change. Expansion/discovery live in `src/commands.ts` (tested).
 
 **Gotchas:**
 - Interactive rendering isn't unit-testable — verify in a real terminal (`bun index.ts`). Watch:
