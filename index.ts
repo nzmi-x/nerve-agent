@@ -7,7 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
-import { activePacks, langForFile, langSkills, runHooks } from "./src/langpack.ts";
+import { activePacks, langForFile, langSkills, runHooks, autofixPrompt, MAX_AUTOFIX } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
@@ -71,7 +71,7 @@ const langTouched = new Set<string>(); // D24: sticky across turns (skill inject
 let langSkillText = "";
 let langSkillKey = "";
 
-async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[]): Promise<void> {
+async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[], autoDepth = 0): Promise<void> {
   const ac = new AbortController();
   const onSigint = (): void => ac.abort();
   process.once("SIGINT", onSigint);
@@ -105,12 +105,23 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
   });
   process.removeListener("SIGINT", onSigint);
   out("\n");
-  // D24 post-edit hooks: auto fix + check the Python files edited this turn (EDIT mode only).
-  if (mode === "edit" && edited.size) {
-    for (const pack of activePacks(edited)) {
-      const summary = await runHooks(pack, [...edited].filter((f) => langForFile(f) === pack), process.cwd());
-      if (summary) out(`${DIM}${summary}${RESET}\n`);
+  if (ac.signal.aborted) return; // Ctrl+C — skip hooks + auto-fix
+  // D24 post-edit hooks: fix + check the Python files edited this turn (EDIT mode only).
+  if (mode !== "edit" || edited.size === 0) return;
+  const summaries: string[] = [];
+  let issues = false;
+  for (const pack of activePacks(edited)) {
+    const res = await runHooks(pack, [...edited].filter((f) => langForFile(f) === pack), process.cwd());
+    if (res.summary) {
+      out(`${DIM}${res.summary}${RESET}\n`);
+      summaries.push(res.summary);
     }
+    issues ||= res.issues;
+  }
+  if (issues && autoDepth < MAX_AUTOFIX) {
+    session.addUser(autofixPrompt(summaries));
+    out(`${DIM}↪ auto-fixing post-edit issues…${RESET}\n`);
+    await runTurn(session, entryId, thinking, temperature, provider, fallbacks, autoDepth + 1);
   }
 }
 

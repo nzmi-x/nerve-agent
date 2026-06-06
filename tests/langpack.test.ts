@@ -1,5 +1,17 @@
 import { test, expect } from "bun:test";
-import { langForFile, activePacks, langSkills, checkSummary, LANGPACKS } from "../src/langpack.ts";
+import { langForFile, activePacks, langSkills, checkSummary, autofixPrompt, LANGPACKS } from "../src/langpack.ts";
+
+test("autofixPrompt: instructs a minimal fix and includes the check summaries", () => {
+  const p = autofixPrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
+  expect(p).toContain("post-edit checks");
+  expect(p).toContain("bad type");
+  expect(p.toLowerCase()).toContain("fix");
+});
+
+test("checkSummary: a clean report ends with ': clean' (drives the no-auto-continue path)", () => {
+  expect(checkSummary("ruff", "All checks passed!").endsWith(": clean")).toBe(true);
+  expect(checkSummary("pyrefly", "a.py:1:1 error: bad").endsWith(": clean")).toBe(false);
+});
 
 test("langForFile / activePacks: python by extension, deduped; others ignored", () => {
   expect(langForFile("a/b.py")?.id).toBe("python");

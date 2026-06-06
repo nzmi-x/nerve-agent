@@ -19,6 +19,9 @@ native, [D24](../DECISIONS.md).
   the **fixers** (edit in place) then the **checkers** (report) on just those files, and prints a
   `⚙ post-edit hooks (<lang>)` summary. Python: `pyrefly infer` → `ruff check --select I --fix` →
   `ruff check --fix` → `ruff format`, then `pyrefly check` + `ruff check`.
+- **Auto-fix loop** (D24): if the checkers still report issues, nerve feeds the summary back to the
+  agent (`autofixPrompt`) for another turn so it fixes them — **bounded by `MAX_AUTOFIX` (2)**; a clean
+  check stops it. Wired in `runAgentTurn` (TUI) / `runTurn` (headless), which recurse with `autoDepth+1`.
 
 **How to change it:**
 - **Add a language** = a `LANGPACK` entry (`extensions`, `skillFiles` under `skills/`, `fixers`,
@@ -31,8 +34,11 @@ native, [D24](../DECISIONS.md).
   safe here and not mid-edit ([D10](../DECISIONS.md)).
 - Fixers modify in place (`pyrefly infer` adds types, `ruff` removes unused imports / formats) — expect
   the agent's just-written code to come back cleaned.
-- Checker errors are shown in the transcript (the human acts); they're **not** auto-fed back to the
-  agent yet (an auto-continue loop is a deferred follow-up, [D24](../DECISIONS.md)).
+- The hooks are only as strict as the **user's pyrefly/ruff config** — the default pyrefly "basic"
+  preset (no `pyrefly.toml`) catches undefined names etc., not every type mismatch. Stricter project
+  config → the auto-fix loop fires on more.
+- The auto-fix loop is **bounded** (`MAX_AUTOFIX`) so the agent can't spin on un-fixable errors; ESC
+  during an auto-fix turn stops it (the abort check skips hooks/continuation).
 - Missing `pyrefly`/`ruff` → that step is skipped with a note (`uv tool install pyrefly`/`ruff`).
 
 **See:** [DECISIONS D24](../DECISIONS.md) · [lsp](lsp.md) · [tools](tools.md) · [marimo](marimo.md)

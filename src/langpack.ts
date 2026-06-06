@@ -35,6 +35,13 @@ export const LANGPACKS: LangPack[] = [
 
 const SKILLS_DIR = resolve(import.meta.dir, "../skills");
 const HOOK_TIMEOUT_MS = 120_000;
+/** Max times nerve auto-continues to fix post-edit checker errors before giving up (D24). */
+export const MAX_AUTOFIX = 2;
+
+/** The follow-up prompt fed back to the agent when post-edit checks fail, to drive the auto-fix loop. */
+export function autofixPrompt(summaries: string[]): string {
+  return `The automatic post-edit checks (pyrefly/ruff) found issues in the files you just edited. Fix them with minimal changes — don't suppress with ignores unless truly necessary:\n\n${summaries.join("\n\n")}`;
+}
 
 const extOf = (path: string): string => {
   const i = path.lastIndexOf(".");
@@ -95,21 +102,28 @@ export function checkSummary(tool: string, out: string): string {
   return body ? `${tool}:\n${clip(body, 2500).replace(/^/gm, "    ")}` : `${tool}: clean`;
 }
 
-/** Run a pack's post-edit hooks on `files` (fixers edit in place, then checkers report). Returns a summary. */
-export async function runHooks(pack: LangPack, files: string[], cwd: string): Promise<string> {
-  if (!files.length) return "";
+/** Run a pack's post-edit hooks on `files`: fixers edit in place, then checkers report. `issues` is
+ *  true when a checker found something — the surface uses it to auto-continue the agent (D24). */
+export async function runHooks(pack: LangPack, files: string[], cwd: string): Promise<{ summary: string; issues: boolean }> {
+  if (!files.length) return { summary: "", issues: false };
   const missing = new Set<string>();
   for (const cmd of pack.fixers) {
     if (!Bun.which(cmd[0]!)) missing.add(cmd[0]!);
     else await sh([...cmd, ...files], cwd);
   }
   const reports: string[] = [];
+  let issues = false;
   for (const cmd of pack.checkers) {
-    if (!Bun.which(cmd[0]!)) missing.add(cmd[0]!);
-    else reports.push(checkSummary(cmd[0]!, await sh([...cmd, ...files], cwd)));
+    if (!Bun.which(cmd[0]!)) {
+      missing.add(cmd[0]!);
+      continue;
+    }
+    const r = checkSummary(cmd[0]!, await sh([...cmd, ...files], cwd));
+    reports.push(r);
+    if (!r.endsWith(": clean")) issues = true;
   }
   const n = files.length;
   const head = `⚙ post-edit hooks (${pack.id}) · ${n} file${n === 1 ? "" : "s"}`;
   const lines = [head, ...(missing.size ? [`  not installed (skipped): ${[...missing].join(", ")}`] : []), ...reports.map((r) => `  ${r}`)];
-  return lines.join("\n");
+  return { summary: lines.join("\n"), issues };
 }

@@ -31,7 +31,7 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
-import { activePacks, langForFile, langSkills, runHooks } from "../langpack.ts";
+import { activePacks, langForFile, langSkills, runHooks, autofixPrompt, MAX_AUTOFIX } from "../langpack.ts";
 import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
@@ -511,6 +511,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer();
     addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
+    await runAgentTurn(0);
+    busy = false;
+    setStatus();
+    input.focus();
+  }
+
+  // One agent turn: stream → tools → post-edit hooks → (D24) auto-fix loop if the checks failed.
+  async function runAgentTurn(autoDepth: number): Promise<void> {
     let reasoningLine: TextRenderable | null = null;
     let answer = addMarkdown();
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
@@ -522,7 +530,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     const sys = packs.length && langSkillText ? `${system}\n\n${langSkillText}` : system;
     const edited = new Set<string>();
-    turnAbort = new AbortController();
+    const ac = new AbortController();
+    turnAbort = ac;
     try {
       await loop({
         provider,
@@ -538,7 +547,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           }),
           ic.tokenTap(session),
         ],
-        signal: turnAbort.signal,
+        signal: ac.signal,
         system: sys,
         tools,
         thinking: active.thinking ?? false,
@@ -566,19 +575,28 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       answer.streaming = false;
       turnAbort = null;
     }
-    // D24 post-edit hooks: auto-fix + check the files edited this turn (EDIT only). Files were just
-    // written, so this is the safe time to reformat (next turn re-reads / hashline re-anchors).
-    if (mode === "edit" && edited.size) {
-      for (const pack of activePacks(edited)) {
-        const files = [...edited].filter((f) => langForFile(f) === pack);
-        const note = addText(t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
-        note.content = (await runHooks(pack, files, cwd)) || note.content;
-        note.fg = MUTE;
-      }
+    if (ac.signal.aborted) return; // user hit ESC — skip hooks + auto-fix
+
+    // D24 post-edit hooks: fix + check the files edited this turn (EDIT only). Files were just written,
+    // so this is the safe time to reformat (next turn re-reads / hashline re-anchors).
+    if (mode !== "edit" || edited.size === 0) return;
+    const summaries: string[] = [];
+    let issues = false;
+    for (const pack of activePacks(edited)) {
+      const files = [...edited].filter((f) => langForFile(f) === pack);
+      const note = addText(t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
+      const res = await runHooks(pack, files, cwd);
+      note.content = res.summary || note.content;
+      note.fg = MUTE;
+      if (res.summary) summaries.push(res.summary);
+      issues ||= res.issues;
     }
-    busy = false;
-    setStatus();
-    input.focus();
+    // Auto-fix loop: feed the failing checks back so the agent fixes them, bounded by MAX_AUTOFIX.
+    if (issues && autoDepth < MAX_AUTOFIX) {
+      session.addUser(autofixPrompt(summaries));
+      addText(t`${fg(YELLOW)("↪")} ${fg(MUTE)("auto-fixing post-edit issues…")}`);
+      await runAgentTurn(autoDepth + 1);
+    }
   }
 
   let shuttingDown = false;
