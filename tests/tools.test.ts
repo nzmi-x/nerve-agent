@@ -78,7 +78,7 @@ test("edit: a stale anchor rejects the patch, returns fresh anchors, and leaves 
 test("registry: unique names, lookup, and readonly flags", () => {
   const names = tools.map((t) => t.name);
   expect(new Set(names).size).toBe(names.length);
-  expect(toolByName("read")).toBe(read);
+  expect(toolByName("read")?.name).toBe("read"); // by name, not identity — the set is swappable (D7)
   expect(toolByName("nope")).toBeUndefined();
   expect(read.readonly).toBe(true);
   expect(write.readonly).toBe(false);

@@ -13,6 +13,11 @@
 - The loop composes them **in order**: `secret-redaction → reasoning-router → stop-guard → token-tap`
   — redaction before the tap (or a secret is logged), tap last (it records the final event).
 
+**Hot-swap ([D7](../DECISIONS.md)):** the TUI imports this module as a namespace and rebuilds the
+interceptor array each turn from it, so `/reload`/Ctrl+R re-imports `interceptors.ts` **cache-busted**
+and the next turn uses the fresh factories (conversation preserved; failure keeps the old module). Keep
+this module re-import-safe — no top-level side effects that can't run twice.
+
 **How to change it:**
 - A new behavior = a new factory here + place it in the loop's interceptor array at the right spot.
   Don't touch `pipe`. Keep them **synchronous** (the per-delta path stays fast).

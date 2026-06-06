@@ -19,7 +19,7 @@
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /sessions /resume [id] /drop /balance /quit` + skill listing
+- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /reload /sessions /resume [id] /drop /balance /quit` + skill listing
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
   `<name>.md` under `~/.claude/commands`, `./.claude/commands`, or `./.nerve/commands` expands its body
   (`$1`/`$@`/`$ARGUMENTS` substitution) and submits it as a prompt. A built-in name always wins.
@@ -29,11 +29,15 @@
   recent that isn't current), replaying its messages into the transcript (`renderHistory`). `/sessions`
   lists them (id · #msgs · age · first-message preview, current marked ●); `/sessions delete <id>`
   removes one (refuses the current — use `/drop`). Discovery via `src/sessions.ts`.
+- **Hot-swap ([D7](../DECISIONS.md)):** `/reload` (or **Ctrl+R**) re-imports tools + interceptors from
+  disk (cache-busted), conversation preserved; `reload()` calls `reloadTools()` + re-imports
+  `interceptors.ts`, refreshes the provider specs, and on failure keeps the running set (rollback).
+  Takes effect from the next turn.
 - **Keys:** Enter with a popup open **accepts the highlighted suggestion** before acting — a `/`
   command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
   and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
-  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit.
-  (`/exit` aliases `/quit`.)
+  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **Ctrl+R reload** · ESC stop ·
+  Ctrl+C quit. (`/exit` aliases `/quit`.)
 
 **How to change it:**
 - The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;

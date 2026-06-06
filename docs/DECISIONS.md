@@ -492,8 +492,10 @@ it. The system prompt is agent-editable/hot-swappable, so the style can be tuned
   with a clear error if any is missing — nerve shells out to them, so fail fast over failing mid-task.
 - **Sessions:** `/resume [id]` switches to an existing session (default = most recent that isn't the
   current one); `/sessions` lists them; `/sessions delete <id>` removes one (not the current — that's `/drop`).
-- **Hot reload:** `/reload` command + keybind (`Ctrl+R`) ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
-  Must roll back to the old module on a failed import once nerve self-edits ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
+- **Hot reload (built, Phase 1.5):** `/reload` + `Ctrl+R` re-import `src/tools/` (via `reloadTools()`,
+  cache-busted per `TOOL_MODULES`) and `src/interceptors.ts` ([D7](#d7--self-hacking-runtime-hot-swap-of-seams));
+  conversation preserved, engine untouched. **Rollback implemented** — a failed import keeps the running
+  set ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)). Verified live (a disk edit to a tool is picked up).
 - **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).
 - **Tool shape:** `{ name, description, parameters (JSON Schema), readonly: boolean, run(args, ctx) }`.
   JSON Schema maps cleanly to Gemini `functionDeclarations` and DeepSeek `tools`.

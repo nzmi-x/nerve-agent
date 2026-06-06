@@ -22,8 +22,9 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { loop } from "../loop.ts";
-import { reasoningRouter, secretRedaction, tokenTap } from "../interceptors.ts";
+import * as interceptorsMod from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
+import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { selectModel, providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
@@ -79,9 +80,9 @@ const syntaxStyle = SyntaxStyle.fromStyles({
 type Content = string | ReturnType<typeof t>;
 
 const HELP = [
-  "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /sessions · /resume [id] · /drop · /balance · /quit",
+  "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
+  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · Ctrl+R reload · ESC stop · Ctrl+C quit",
 ].join("\n");
 
 export interface TuiOptions {
@@ -113,8 +114,11 @@ interface PopupRow {
 export async function runTui(opts: TuiOptions): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30 });
   renderer.setBackgroundColor(DARKFG);
-  const { models, cwd, system, tools, skills, commands, compactionPrompt } = opts;
+  const { models, cwd, system, skills, commands, compactionPrompt } = opts;
   const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
+  // Hot-swappable leaf seams (D7): tool specs + interceptor factories. /reload re-imports them.
+  let tools = opts.tools;
+  let ic = interceptorsMod;
 
   let active = opts.entry;
   let provider = opts.provider;
@@ -355,6 +359,22 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
   }
 
+  // Hot-swap (D7): re-import tools + interceptors from disk, conversation preserved. The engine
+  // (loop/dispatch/providers/session) never swaps — only these leaf seams. On failure the old set is
+  // kept (rollback, D11). Takes effect from the next turn (mid-loop interceptors stay fixed).
+  async function reload(): Promise<void> {
+    const rt = await reloadTools();
+    let icErr = "";
+    try {
+      ic = (await import(`../interceptors.ts?t=${Date.now()}`)) as typeof interceptorsMod;
+    } catch (e) {
+      icErr = e instanceof Error ? e.message : String(e);
+    }
+    if (rt.ok) tools = toolSpecs(); // refresh provider-facing specs for the next turn
+    if (rt.ok && !icErr) addText(t`${fg(GREEN)("↻")} ${fg(MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
+    else addText(`✗ reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`, RED);
+  }
+
   async function drop(): Promise<void> {
     const old = session.id;
     await session.close();
@@ -423,6 +443,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return;
       case "compact":
         return void compact(args.join(" "));
+      case "reload":
+        return void reload();
       case "drop":
         return void drop();
       case "mode": {
@@ -492,12 +514,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         mode,
         ctx: { cwd, ask },
         interceptors: [
-          secretRedaction(),
-          reasoningRouter((d) => {
+          ic.secretRedaction(),
+          ic.reasoningRouter((d) => {
             reasoningLine ??= addText("✻ ", DIM, TextAttributes.ITALIC);
             reasoningLine.content += d;
           }),
-          tokenTap(session),
+          ic.tokenTap(session),
         ],
         signal: turnAbort.signal,
         system,
@@ -574,6 +596,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (key.ctrl && key.name === "c") return void shutdown();
+    if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
 
     if (asking) {
       if (key.name === "up") {

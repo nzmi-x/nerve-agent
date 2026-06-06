@@ -22,6 +22,7 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "mode", description: "Set mode — /mode plan|edit" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "compact", description: "Summarize old turns to free up context — /compact [focus]" },
+  { name: "reload", description: "Hot-swap tools + interceptors from disk (Ctrl+R)" },
   { name: "drop", description: "Delete this session and start a fresh one" },
   { name: "resume", description: "Resume last session (or /resume <id>)" },
   { name: "sessions", description: "List sessions; /sessions delete <id>" },

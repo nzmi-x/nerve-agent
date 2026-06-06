@@ -29,10 +29,16 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
   the TUI renders an interactive picker, headless auto-recommends). `readonly` → usable in PLAN. The
   contract: 2–4 options, mark one `recommended` unless they're equivalent.
 
+**Hot-swap ([D7](../DECISIONS.md)):** the active set is a **mutable** `let tools` in `registry.ts`;
+`reloadTools()` re-imports every entry in `TOOL_MODULES` **cache-busted** (`import("./x.ts?t=…")`) and
+swaps it — so `/reload`/Ctrl+R picks up edits to a tool's `run` live, no restart. On any failure the old
+set is **kept** (rollback, [D11](../DECISIONS.md)). `dispatch` resolves via `toolByName` against the live
+set, so the swap needs no engine change. Keep tool files re-import-safe (no top-level side effects).
+
 **How to change it:**
-- **Add a tool** = a new `src/tools/<name>.ts` exporting a `Tool`, then add it to `tools` in
-  `registry.ts`. Set `readonly` honestly. A tool must earn its rent ([D2](../DECISIONS.md)): high
-  frequency × reuse × token-savings vs. an ad-hoc bash call.
+- **Add a tool** = a new `src/tools/<name>.ts` exporting a `Tool`, then add it to `tools` **and**
+  `TOOL_MODULES` in `registry.ts` (the latter so it hot-reloads). Set `readonly` honestly. A tool must
+  earn its rent ([D2](../DECISIONS.md)): high frequency × reuse × token-savings vs. an ad-hoc bash call.
 - Keep `run` thin and side-effect-honest (`Bun.file`/`Bun.write`/`Bun.$`/`fetch`). Resolve paths
   against `ctx.cwd`.
 
