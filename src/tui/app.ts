@@ -186,16 +186,27 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
 
   // --- popup (autosuggest + ask picker, with row highlight) -----------------
+  // A fixed pool of row renderables we UPDATE in place (never recreate) — recreating with reused ids
+  // left stale cells that bled old content through new rows. Inactive rows are height 0.
+  const MAX_POPUP = 12;
   const popupRows: TextRenderable[] = [];
+  for (let i = 0; i < MAX_POPUP; i++) {
+    const tr = new TextRenderable(renderer, { id: `pop-${i}`, content: "", height: 0, fg: MUTE });
+    popup.add(tr);
+    popupRows.push(tr);
+  }
   const setPopup = (rows: PopupRow[]): void => {
-    for (const r of popupRows) popup.remove(r.id);
-    popupRows.length = 0;
-    rows.forEach((row, i) => {
-      const tr = new TextRenderable(renderer, { id: `pop-${i}`, content: row.content, fg: row.fg, ...(row.bg ? { bg: row.bg } : {}), attributes: row.bold ? TextAttributes.BOLD : 0 });
-      popup.add(tr);
-      popupRows.push(tr);
-    });
-    popup.height = rows.length;
+    const n = Math.min(rows.length, MAX_POPUP);
+    for (let i = 0; i < MAX_POPUP; i++) {
+      const tr = popupRows[i]!;
+      const row = i < n ? rows[i]! : null;
+      tr.content = row ? row.content : "";
+      tr.fg = row ? row.fg : MUTE;
+      tr.bg = row?.bg ?? "transparent";
+      tr.attributes = row?.bold ? TextAttributes.BOLD : 0;
+      tr.height = row ? 1 : 0;
+    }
+    popup.height = n;
   };
   const suggestOpen = (): boolean => suggest.items.length > 0;
   const clearSuggest = (): void => {
@@ -213,8 +224,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const paths = await atSuggestions(aff.query, cwd);
       suggest = { kind: "at", items: paths.map((p) => ({ label: p, insert: p })), sel: 0 };
     } else if (aff.kind === "slash") {
-      const cmds = slashSuggestions(aff.query, skills);
-      suggest = { kind: "slash", items: cmds.map((c) => ({ label: `/${c.name}${c.description ? `   ${c.description}` : ""}`, insert: c.name })), sel: 0 };
+      const cmds = slashSuggestions(aff.query, skills).slice(0, MAX_POPUP);
+      suggest = { kind: "slash", items: cmds.map((c) => ({ label: `${`/${c.name}`.padEnd(13)}${trunc(c.description, 60)}`, insert: c.name })), sel: 0 };
     } else {
       suggest = { kind: "none", items: [], sel: 0 };
     }
@@ -234,7 +245,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const rows: PopupRow[] = [{ content: `? ${asking.req.question}`, fg: ACCENT, bold: true }];
     asking.req.options.forEach((o, i) => {
       const sel = i === asking!.sel;
-      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${o.description}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
+      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${trunc(o.description, 60)}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
     });
     setPopup(rows);
   };
@@ -475,4 +486,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 function firstLine(s: string): string {
   const l = s.split("\n")[0] ?? "";
   return l.length > 120 ? `${l.slice(0, 117)}…` : l;
+}
+
+function trunc(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
