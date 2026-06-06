@@ -281,6 +281,28 @@ pages (it's "how it fits/why", not "how to change X"); co-locating `.md` beside 
 self-host). Per-subsystem pages are authored **alongside their code** (manual page ships in the same
 commit as the subsystem), so the manual grows with — and never ahead of — the implementation.
 
+## D14 — TUI input affordances: `@` files, `!` shell, `/` commands, with autosuggest
+**Decision.** The input recognizes three prefixes, each with an autosuggestion popup. Parsing,
+suggestion, and command/skill logic are **pure/fs-only** (`src/tui/affordances.ts`, unit-tested); the
+popup rendering + key handling live in `app.ts`.
+- **`@path` — file reference, reference-only (lazy).** Autocompletes file/dir paths (dirs get `/`,
+  drill in by accepting). On submit the `@path` stays as **plain text** — the model `read`s it when
+  it needs the content. No inline expansion (leanest; the `read` tool already exists).
+- **`!command` — direct shell, full authority, private.** Runs with **full authority, bypassing the
+  PLAN/YOLO gate** (that gate governs the *model*; the human is trusted), shows the output, and does
+  **not** add it to the conversation (a side-glance that doesn't spend context). No suggestions (freeform).
+- **`/command` — commands + skills.** Autosuggests built-ins (`help`, `model`, `mode`, `clear`,
+  `drop`, `resume`, `quit`) **+** discovered skills (name/description from `~/.claude` + `./.claude`
+  `SKILL.md` frontmatter — a partial [D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)). Skill *invocation* is deferred to Phase 2; listing works now.
+- **`/drop`** deletes the current session file and starts a fresh one — for throwaway sessions that
+  shouldn't clutter history (distinct from `/clear`, which only clears the transcript view).
+**Why.** Matches the affordances every terminal agent has; keeping the logic pure makes the part I
+can't runtime-test small. Reference-only `@` and private `!` are the lean, least-surprising defaults.
+**Rejected.** `@` inline-expansion (up-front tokens; `read` covers it); `!` respecting the mode gate
+(the gate is for the model, not the human); eager skill loading.
+**Phase.** Affordance logic + `/drop` + built-in commands: **Phase 1**. Skill invocation, and richer
+suggestions: Phase 2. Interactive rendering needs a real-terminal verification pass.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
