@@ -19,8 +19,9 @@ bun install              # deps
 bun run dev              # bun --watch index.ts — runs the TUI, restarts on change
 bun run start            # bun index.ts — one-shot run
 bun index.ts --resume last   # resume the most recent session (replays .nerve/sessions/<id>.jsonl)
-bun test                 # bun:test (all tests)
-bun test src/stream      # run a subset by path filter
+bun run test             # bun test ./tests/ — our suite (scoped; references/ is NOT a test root)
+bun test ./tests/stream.test.ts   # run one file
+# NB: bare `bun test` scans the whole tree incl. references/ — always scope to ./tests/
 bun run typecheck        # tsc --noEmit (no build step exists — Bun runs .ts directly)
 ```
 
