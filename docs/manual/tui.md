@@ -7,8 +7,10 @@
 
 **How it works:**
 - Paneled layout (Tokyo-Night palette): a **bordered transcript** `Box` (rounded, title " ◆ nerve ")
-  wrapping a `ScrollBox` (`stickyScroll: bottom`) · a `popup` `Box` (autosuggest **or** ask picker, with
-  per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled status bar.
+  wrapping a `ScrollBox` (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned,
+  colored `☑ todos`, updated in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a
+  `popup` `Box` (autosuggest **or** ask picker, per-row bg highlight) · a **bordered input** `Box`
+  (`❯` prompt + `Input`) · a styled status bar.
 - **Assistant answers render as markdown** — a streaming `MarkdownRenderable` (`SyntaxStyle` from the
   palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
   `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are

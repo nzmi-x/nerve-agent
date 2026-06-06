@@ -12,6 +12,12 @@ export interface AskRequest {
   options: AskOption[];
 }
 
+/** One item of the agent's task list (the `todo` tool, D25). */
+export interface Todo {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
 export interface ToolContext {
   /** Working directory; relative tool paths resolve against it. */
   cwd: string;
@@ -27,6 +33,8 @@ export interface ToolContext {
   touched?: Set<string>;
   /** Absolute paths *edited* this turn (write/edit) — the post-edit hooks run on these. */
   edited?: Set<string>;
+  /** Display the agent's task list (the `todo` tool, D25) — the TUI renders a panel, headless prints. */
+  setTodos?: (todos: Todo[]) => void;
 }
 
 export interface Tool {

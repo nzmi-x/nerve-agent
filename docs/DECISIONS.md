@@ -592,6 +592,23 @@ and a *no-progress* check (unchanged issues after an edit) is the only stop, not
 **Phase.** Built now (Phase 1.5), live-verified (messy `.py` → annotated/sorted/formatted, checkers
 clean; an undefined-name error → `issues:true` → auto-fix loop). Add a language = a `LANGPACK` entry + its `skills/` files.
 
+## D25 — A `todo` tool with a pinned, colored TUI panel
+**Decision.** A `todo` tool ([D20](#d20--surveyed-and-deliberately-deferred-or-rejected) promoted) lets the agent keep a task list for multi-step
+work: it passes the **full list** each call (replace, not patch), each item `{ content, status:
+pending|in_progress|completed }`. It's **`readonly: true`** (touches only ephemeral UI state) so it's
+PLAN-safe. The surface displays it via a new `ctx.setTodos` callback: the **TUI renders a pinned,
+colored panel** above the input (`☑ todos · done/total`; `✓` green done · `▸` yellow-bold active · `○`
+muted pending), updated **in place**; headless prints the checklist. The tool also **returns the
+checklist as its result**, so the model re-sees its plan in context each turn.
+**Why.** The standard "stay-on-track over a long task" feature (claude-code's `TodoWrite`, which the
+models are already primed for); the user missed having it. Lean — one tool + one panel, no new engine.
+**Rejected.** Per-item patch ops (replace-the-whole-list is simpler and what the models expect);
+**persisting** todos to the session JSONL (it's ephemeral working state — the tool *result* is in
+history so the model keeps the plan, but the panel starts fresh on resume); a separate reminder
+subsystem (the always-visible panel + the in-context result suffice). `activeForm`/present-tense
+labels (kept to `content` + `status` for now).
+**Phase.** Built now (Phase 1.5).
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

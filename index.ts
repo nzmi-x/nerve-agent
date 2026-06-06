@@ -99,7 +99,10 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     onEvent: (ev) => {
       if (ev.type === "text") out(ev.delta);
     },
-    onToolResult: (name, result) => out(`\n${DIM}→ ${name}: ${result.split("\n")[0]?.slice(0, 120) ?? ""}${RESET}\n`),
+    onToolResult: (name, result) => {
+      if (name === "todo") return void out(`\n${DIM}${result}${RESET}\n`); // print the full checklist
+      out(`\n${DIM}→ ${name}: ${result.split("\n")[0]?.slice(0, 120) ?? ""}${RESET}\n`);
+    },
     onRetry: ({ delayMs, model }) => out(`\n${DIM}↻ retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…${RESET}\n`),
     onError: (e) => process.stderr.write(`\nnerve: ${e instanceof Error ? e.message : String(e)}\n`),
   });

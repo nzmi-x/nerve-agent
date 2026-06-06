@@ -36,7 +36,7 @@ import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
-import type { AskRequest } from "../tools/types.ts";
+import type { AskRequest, Todo } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
@@ -158,6 +158,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const transcript = new ScrollBoxRenderable(renderer, { id: "transcript", flexGrow: 1, width: "100%", stickyScroll: true, stickyStart: "bottom" });
   transcriptBox.add(transcript);
 
+  const todoBox = new BoxRenderable(renderer, { id: "todoBox", flexShrink: 0, height: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1 });
   const popup = new BoxRenderable(renderer, { id: "popup", flexShrink: 0, height: 0, flexDirection: "column", paddingLeft: 2, paddingRight: 1 });
   const inputBox = new BoxRenderable(renderer, {
     id: "inputBox",
@@ -178,11 +179,41 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: PANEL });
 
   root.add(transcriptBox);
+  root.add(todoBox);
   root.add(popup);
   root.add(inputBox);
   root.add(status);
   renderer.root.add(root);
   input.focus();
+
+  // --- todo panel (D25): pinned, colored, updated in place by the `todo` tool -----------------
+  const MAX_TODO_ROWS = 13; // 1 header + 12 items
+  const todoRows: TextRenderable[] = [];
+  for (let i = 0; i < MAX_TODO_ROWS; i++) {
+    const tr = new TextRenderable(renderer, { id: `todo-${i}`, content: "", height: 0 });
+    todoBox.add(tr);
+    todoRows.push(tr);
+  }
+  const setTodos = (todos: Todo[]): void => {
+    const shown = todos.slice(0, MAX_TODO_ROWS - 1);
+    const rows: Content[] = [];
+    if (shown.length) {
+      const done = todos.filter((td) => td.status === "completed").length;
+      const extra = todos.length > shown.length ? `  +${todos.length - shown.length}` : "";
+      rows.push(t`${bold(fg(ACCENT)("☑ todos"))} ${fg(MUTE)(`· ${done}/${todos.length}${extra}`)}`);
+      for (const td of shown) {
+        if (td.status === "completed") rows.push(t`${fg(GREEN)(" ✓")} ${fg(DIM)(td.content)}`);
+        else if (td.status === "in_progress") rows.push(t`${fg(YELLOW)(" ▸")} ${bold(fg(WHITE)(td.content))}`);
+        else rows.push(t`${fg(MUTE)(" ○")} ${fg(MUTE)(td.content)}`);
+      }
+    }
+    for (let i = 0; i < todoRows.length; i++) {
+      const tr = todoRows[i]!;
+      tr.content = i < rows.length ? rows[i]! : "";
+      tr.height = i < rows.length ? 1 : 0;
+    }
+    todoBox.height = rows.length;
+  };
 
   // --- transcript -----------------------------------------------------------
   const lineIds: string[] = [];
@@ -394,6 +425,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     session = new Session({});
     meter = new UsageMeter();
     clearTranscript();
+    setTodos([]); // fresh session, fresh task list
     addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
     setStatus();
   }
@@ -540,7 +572,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
@@ -562,7 +594,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
             setStatus();
           }
         },
-        onToolResult: (name, result) => addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`),
+        onToolResult: (name, result) => {
+          if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
+          addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);
+        },
         onRetry: ({ delayMs, model }) => {
           transcript.remove(answer.id); // drop the failed (usually empty) attempt
           reasoningLine = null;
