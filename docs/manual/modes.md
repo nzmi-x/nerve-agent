@@ -15,10 +15,18 @@
   limited to read-only subcommands (`SAFE_GIT`: log/diff/status/show/blame/…, never commit/add/push/…).
 - `dispatch(name, args, mode, ctx)` resolves the tool from the registry, gates it, runs it, and
   returns the result — or `Refused (MODE): …` / `Error: …`. It never throws and never mutates the mode.
+- **Destructive-command guard ([D18](../DECISIONS.md)).** Before the mode gate, `dispatch` runs the
+  model's `bash` command through `dangerousCommand(cmd)` — a pure blocklist of catastrophic patterns
+  (`rm -rf /`/`~`, fork bomb, `mkfs`, whole-disk `dd`, `> /dev/sd*`, writes to `/etc/passwd|shadow`,
+  `curl|sh`). A match returns `Refused (guard): …` in **both** PLAN and EDIT. This is a safety *floor*,
+  orthogonal to the mode tier: it never prompts, never changes the mode, and does **not** apply to the
+  human's `!`-shell escape ([D14](../DECISIONS.md) — the human is trusted).
 
 **How to change it:**
 - Add a safe PLAN command → extend `SAFE_PROGRAMS` / `SAFE_GIT` (only if it's *obviously* read-only).
   Prefer building a dedicated `readonly` tool over loosening the bash filter ([AGENT_RULES §2](../AGENT_RULES.md), D2/D4).
+- Add a destructive pattern to refuse → extend `DESTRUCTIVE` / `isRootWipe` (keep it conservative —
+  a false positive blocks legit work; it's a floor, not a fence).
 - **Never** add a model-reachable path to change `mode`, and never relax `METACHAR` to fit one command.
 
 **Gotchas:**

@@ -26,6 +26,40 @@ const SAFE_GIT = new Set([
   "describe", "shortlog", "reflog", "cat-file", "show-ref", "for-each-ref", "whatchanged", "name-rev", "grep",
 ]);
 
+// --- D18: destructive-command guard (a mode-independent safety floor on the model's bash) ---------
+// Catastrophic, hard-to-undo shell patterns are refused in BOTH modes — EDIT auto-runs everything, so
+// a self-hosting agent shouldn't be able to wipe the machine while you're away. This is a safety
+// FLOOR, not a permission tier: it never prompts (the loop can't block — it hard-refuses), never
+// touches the human-only mode switch (D4), and does NOT gate the human's `!`-shell escape (D14, the
+// human is trusted). Conservative on purpose; the list grows by judgement (recorded in DECISIONS D18).
+const DESTRUCTIVE: { re: RegExp; reason: string }[] = [
+  { re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "fork bomb" },
+  { re: /\bmkfs\b/, reason: "filesystem format (mkfs)" },
+  { re: /\bdd\b[^|&;]*\bof=\/dev\/(sd|hd|nvme|vd|disk|mmcblk)/, reason: "raw write to a disk device (dd)" },
+  { re: />\s*\/dev\/(sd|hd|nvme|vd|disk|mmcblk)/, reason: "redirect over a disk device" },
+  { re: /(^|[\s>|])(tee\s+|>>?\s*)\/etc\/(passwd|shadow|sudoers)\b/, reason: "write to a critical system file" },
+  { re: /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/, reason: "pipe a network download straight into a shell" },
+];
+
+/** A `rm -rf`-class wipe of root, home, or a root-level glob. Split out because recursive+force flag
+ *  detection plus an "everything" target reads more clearly than one dense regex. */
+function isRootWipe(cmd: string): boolean {
+  if (!/\brm\b/.test(cmd)) return false;
+  const recursive = /\brm\b[^|&;]*?\s-[a-zA-Z]*r/i.test(cmd) || /\brm\b[^|&;]*--recursive/.test(cmd);
+  const force = /\brm\b[^|&;]*?\s-[a-zA-Z]*f/i.test(cmd) || /\brm\b[^|&;]*--force/.test(cmd);
+  if (!recursive || !force) return false;
+  // a target that means "everything": /, /*, ~, ~/, ~/*, $HOME, $HOME/*
+  return /\s(\/|\/\*|~|~\/\*?|\$HOME(\/\*)?)(\s|$)/.test(cmd);
+}
+
+/** Pure: is this shell command catastrophic regardless of mode? `{ok:true}` = safe to consider. (D18) */
+export function dangerousCommand(command: string): Decision {
+  const cmd = command.trim();
+  if (isRootWipe(cmd)) return { ok: false, reason: "recursive force-remove of a root/home path" };
+  for (const { re, reason } of DESTRUCTIVE) if (re.test(cmd)) return { ok: false, reason };
+  return { ok: true };
+}
+
 /** Is this a `bash` command obviously safe to run in PLAN mode? */
 export function planBashAllowed(command: string): Decision {
   const cmd = command.trim();
@@ -61,6 +95,11 @@ export async function dispatch(
 ): Promise<string> {
   const tool = toolByName(name);
   if (!tool) return `Error: unknown tool '${name}'`;
+  // D18 safety floor: refuse catastrophic bash in BOTH modes, before the mode gate.
+  if (tool.name === "bash") {
+    const guard = dangerousCommand(typeof args.command === "string" ? args.command : "");
+    if (!guard.ok) return `Refused (guard): ${guard.reason} — run it yourself via !shell if you really mean to`;
+  }
   const decision = allowed(tool, args, mode);
   if (!decision.ok) return `Refused (${mode.toUpperCase()} mode): ${decision.reason}`;
   try {
