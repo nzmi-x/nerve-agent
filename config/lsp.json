@@ -1,0 +1,12 @@
+{
+  "$schema": "./lsp.schema.json",
+  "servers": [
+    {
+      "id": "typescript",
+      "extensions": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "rootMarkers": ["tsconfig.json", "package.json"]
+    }
+  ]
+}

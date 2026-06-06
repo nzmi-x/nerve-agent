@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nerve.local/models.schema.json",
+  "title": "nerve model catalog",
+  "description": "Committed catalog of usable models. No secrets — API keys live in .env (GEMINI_API_KEY / DEEPSEEK_API_KEY). Adding a model = adding an entry here, never a code path.",
+  "type": "object",
+  "required": ["models"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to this schema file, enabling editor IntelliSense + validation."
+    },
+    "models": {
+      "type": "array",
+      "description": "Usable models, roughly ordered by increasing capability/cost.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/model" }
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "required": ["id", "provider"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact model id sent to the provider API (e.g. \"deepseek-v4-flash\", \"gemini-3.5-pro\")."
+        },
+        "provider": {
+          "enum": ["gemini", "deepseek"],
+          "description": "Which provider serves this model. nerve supports ONLY these two."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-friendly description shown in the picker / status line."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Mark exactly one model as the startup default. If none is marked, the first entry is used."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Optional sampling temperature override for this model."
+        },
+        "thinking": {
+          "type": "boolean",
+          "description": "Optional: request the provider's reasoning/thinking mode for this model."
+        }
+      }
+    }
+  }
+}

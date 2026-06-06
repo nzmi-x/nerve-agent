@@ -1,0 +1,41 @@
+{
+  // Strict TypeScript for native Bun. No emit — Bun runs .ts directly.
+  // Keep this file boring and stable; the harness's hackability lives in src/, not here.
+  "compilerOptions": {
+    // Environment: latest features, Bun globals, no DOM.
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "types": ["bun"],
+
+    // Bundler/Bun module mode — import ".ts" extensions directly.
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    // Correctness — this is an agent that edits files; surprises are expensive.
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Refactor-friendly: unused locals/params are noise mid-hack, not errors.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false
+  },
+
+  // Only typecheck nerve's own code. `references/` are read-only study repos
+  // with their own toolchains — never compiled or edited here.
+  "include": ["index.ts", "src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "references", "dist", "out"]
+}

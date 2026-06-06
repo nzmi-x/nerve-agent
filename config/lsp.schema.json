@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nerve.local/lsp.schema.json",
+  "title": "nerve LSP server catalog",
+  "description": "Committed catalog of language servers. Maps file extensions to a server nerve spawns over stdio (raw JSON-RPC). Servers start lazily on the first file of a matching type, are kept warm, and are killed on exit. Add a language = add an entry here.",
+  "type": "object",
+  "required": ["servers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to this schema file, enabling editor IntelliSense + validation."
+    },
+    "servers": {
+      "type": "array",
+      "description": "Language servers, matched to files by extension.",
+      "items": { "$ref": "#/$defs/server" }
+    }
+  },
+  "$defs": {
+    "server": {
+      "type": "object",
+      "required": ["id", "extensions", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short identifier for this server (e.g. \"typescript\", \"gopls\")."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^\\." },
+          "description": "File extensions this server handles, each leading with a dot (e.g. \".ts\", \".tsx\")."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Executable to spawn. Must be on PATH (nerve does not install servers)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments passed to the server. Most stdio servers need their stdio flag, e.g. [\"--stdio\"]."
+        },
+        "rootMarkers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files that mark the project root for this server (e.g. [\"tsconfig.json\", \"package.json\"]). Used to compute the initialize rootUri. Defaults to the launch dir if omitted."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Extra environment variables for the server process."
+        }
+      }
+    }
+  }
+}

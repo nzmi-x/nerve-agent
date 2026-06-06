@@ -1,0 +1,31 @@
+{
+  "$schema": "./models.schema.json",
+  "models": [
+    {
+      "id": "deepseek-v4-flash",
+      "provider": "deepseek",
+      "label": "Flash — simple edits, context-gathering, subagents",
+      "default": true
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "provider": "deepseek",
+      "label": "Pro — slightly complex tasks"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "provider": "gemini",
+      "label": "Gemini Flash — fast capable (GA; default thinkingLevel medium)"
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "provider": "gemini",
+      "label": "Gemini Pro — current Pro tier (preview) until 3.5-pro ships; default thinkingLevel high"
+    },
+    {
+      "id": "gemini-3.5-pro",
+      "provider": "gemini",
+      "label": "Gemini Pro — NOT RELEASED yet (placeholder for when it ships; will 404 until then)"
+    }
+  ]
+}

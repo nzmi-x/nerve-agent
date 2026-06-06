@@ -1,0 +1,296 @@
+# DECISIONS.md
+
+Standing record of the design decisions behind `nerve`, captured from a deliberate
+grilling session. Each entry states the decision, why it won, and what was rejected — so the
+reasoning survives and isn't re-litigated. New decisions append here; reversals edit the
+relevant entry and say so. ADR-lite, no ceremony.
+
+---
+
+## D1 — Primary purpose: personal coding agent
+**Decision.** nerve is a single-developer **coding agent**. It operates on a working directory
+(the dir it's launched in): reads, edits, runs shell, iterates on code. This gives it a
+working-dir concept, filesystem + shell tools, and diff/code-centric rendering.
+**Why.** It's the 90% use case; the references (claude-code, opencode) are coding agents.
+**Rejected.** General chat-first agent; narrow single-workflow runner.
+**Implication.** When launched *inside the nerve repo*, the same tools let it edit its own
+harness — the substrate for self-hacking (see [D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
+
+## D2 — Tools earn their place by a rent heuristic, not a fixed count
+**Decision.** No fixed tool count. A capability becomes a dedicated tool when
+**frequency × reusability × token-savings** beats its maintenance cost — i.e. you (or the agent)
+do it often, it's reusable, and a tool saves real tokens vs. ad-hoc bash. Phase 1 seeds the
+obvious winners: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `ls`.
+**Why.** The user's framing: "I don't care how many tools, as long as it has high reusability…
+if the agent often spends a lot of tokens running custom commands for it, make the tool."
+**Rejected.** Fixed "lean 4" or "standard 7" tiers as a hard cap.
+**Implication.** grep/glob/ls ship despite bash covering them, because structured results are
+high-frequency and save tokens vs. parsing stdout. Adding more later is a judgement call against
+the heuristic, recorded here.
+
+## D3 — Edit mechanism: hashline only (content-anchored)
+**Decision.** The **sole** edit path is **hashline editing** (pi-hashline-edit format).
+- `read` emits every line as `LINE#HASH:content`, line-number left-padded for alignment.
+- `HASH` = 2 chars from the 16-char alphabet `ZPMQVRWSNKTXJBYH` (excludes hex digits, vowels,
+  and ambiguous D/G/I/L/O), derived from the (normalized) line content via **`Bun.hash`**
+  (no `xxhashjs` dependency). Lines with no alphanumerics seed the hash from the line number.
+- Edits reference anchors: `{ path, edits: [{ op: "replace"|"append"|"prepend", pos: "11#KT",
+  end?: "14#BH", lines: [...] }] }`. The model points at anchors instead of retyping old lines.
+- **Stale handling: hard reject + re-anchor.** On any hash mismatch the whole patch is rejected
+  and the error returns fresh `LINE#HASH` anchors for the affected region for immediate retry.
+  **No** silent relocation, **no** snapshot cache.
+**Why.** Fewer output tokens (no retyping), kills whitespace/string-not-found loops, and a stale
+read can't corrupt a file (anchors diverge → reject). Leanest robust option; fail-loud.
+**Rejected.** Exact `oldString`/`newString` replace (string-not-found loops); fuzzy replacer
+ladder (opencode's 9 strategies — more code, still retypes lines); unified-diff apply (brittle);
+omp-style snapshot recovery (a snapshot store + merge logic = bloat); keeping string-replace as a
+fallback (two edit mechanisms violates the leanness mandate).
+**Implication.** `read` and `edit` are intentionally coupled through the anchor format. Edit is
+the only place hashes are validated.
+
+## D4 — Permissions: two human-switched modes, enforced at dispatch
+**Decision.** Two modes:
+- **PLAN** (read-only): structured read tools (`read`/`grep`/`glob`/`ls`) **plus** an allowlist of
+  *obviously-safe, single-program* bash commands (e.g. `git diff/log/status/show`, `ls`, `cat`,
+  `rg`, `find`, `head`, `tail`, `wc`) with **no shell metacharacters** (`>`, `>>`, `|`, `;`,
+  `&&`, `$(...)`, backticks, `tee`). Anything fancier is rejected. Mutations are hard-blocked.
+- **YOLO**: everything auto-runs, no confirmation.
+
+The mode switch is **human-only** (TUI keybind, Shift+Tab), enforced in the **tool dispatcher**.
+The model has **no `set_mode` tool** and cannot escalate PLAN → YOLO. Tools carry a `readonly`
+flag; the dispatcher gates on it (+ the bash allowlist) per mode.
+**Why.** The user wants a strict planning/Q&A mode and a fast mode, with the safety boundary
+under human control: "No self toggle, only I can switch modes." Classifying arbitrary shell as
+read-only is unsafe, so PLAN only permits *obviously* safe commands.
+**Rejected.** Per-call y/n confirmation (blocks the loop, needs a confirm UI + allowlist state);
+per-tool policy map (a policy layer to maintain); a model-settable `readOnly` bash flag (trusts
+the model's self-classification — weaker boundary); allowing arbitrary bash in PLAN via a parser.
+**Implication.** Need a read-only capability in PLAN that bash can't safely express? **Build a
+dedicated tool for it** (ties back to [D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)) — don't loosen the bash filter. The loop never blocks
+mid-turn for input; the TUI needs no confirm dialog.
+
+## D5 — Model selection: keys in `.env`, models in a committed catalog
+**Decision.** API keys live in **`.env`** (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`), auto-loaded by
+Bun, already gitignored. Usable models live in a committed **`config/models.json`** catalog (Bun imports
+JSON natively), validated by **`config/models.schema.json`** referenced via an inline `"$schema"` key so
+editors give **IntelliSense + validation** while editing. Each entry
+`{ id, provider, label?, default?, temperature?, thinking? }`. Default profile: **`deepseek-v4-flash`**.
+**Why.** Best secret hygiene (keys never in git or in an agent-editable file); the model list is
+plain data the agent can safely edit; schema-backed JSON catches typos (e.g. a bad `provider`) at
+edit time; models aren't hardcoded, so new releases are a config edit.
+**Format note (revised).** Originally specified as `models.toml`; changed to **JSON + `$schema`**
+at the user's request specifically for editor IntelliSense. Keep `models.schema.json` in sync when
+config fields change.
+**Complexity ladder (user's own):** `deepseek-v4-flash` (simple edits, context-gathering,
+subagents) → `deepseek-v4-pro` (slightly complex) → `gemini-3.5-flash` → `gemini-3.5-pro`
+(careful planning / complex features; unreleased as of 2026-06, expected this month).
+**Rejected.** Keys inside a `nerve.config.toml`/`.ts` (secrets in a file the agent edits);
+runtime profile-cycling UI (the user rarely switches — picks per known task); mode-coupled model
+mapping (couples two orthogonal concerns); hardcoding/listing every Gemini & DeepSeek model.
+
+## D6 — Subagents: deferred, but the loop must be re-entrant
+**Decision.** Subagents are **deferred** past Phase 1. The hard constraint: **`loop.ts` is a pure,
+re-entrant function over a session**, so a subagent later is simply "run the loop with a fresh
+isolated session + a cheaper model profile, return only the final summary."
+**Why.** Keeps Phase 1 single-agent and lean; the re-entrancy constraint makes delegation nearly
+free to add later (cheap model = `deepseek-v4-flash`).
+**Rejected.** Building a `task` tool now; predefined named-role subagents (more structure up front).
+
+## D7 — Self-hacking: runtime hot-swap of seams
+**Decision.** The **tool registry** and the **interceptor pipeline** are hot-reloadable at runtime.
+A `/reload` command (and a keybind) re-imports those modules from disk using **Bun cache-busted
+dynamic import** (`import(path + "?t=" + Date.now())`) and swaps them into the **running** loop
+**without dropping the conversation**. The engine (loop, providers, session) stays put — only the
+*leaf seams* swap. The loop reads tools/interceptors fresh each turn, so the swap is seamless.
+**Why.** Delivers the literal "hot-swap parts on the fly" mandate while keeping a safe boundary:
+swap the leaves, never the engine mid-stream.
+**Rejected.** Edit + restart-to-apply only (loses session state; not "on the fly"); a live `eval`
+hatch against the running session (a REPL — too dangerous/broad for a harness feature).
+**Implication.** Tools/interceptors must be defined in modules that re-import cleanly (no
+top-level side effects that can't run twice). The system prompt is likewise a file read fresh per
+turn, so it's hot-swappable too.
+
+## D8 — Persistence: append-only JSONL per session, resume by replay
+**Decision.** Each session is a file **`.nerve/sessions/<id>.jsonl`** with **typed lines**, appended
+as it happens: `{"t":"msg",...}` canonical messages (user/assistant/tool — including the stored
+reasoning artifact, see [§0 cross-cutting rule](providers.md)) and optional `{"t":"delta",...}` raw
+deltas from the token-tap interceptor. **Resume (`--resume` / last) replays only the `msg` lines**;
+`delta` lines are telemetry/debug, ignored on replay. One file, two purposes. No DB.
+**Why.** Lean, greppable, crash-recoverable, and the agent can read its own past sessions. Typed
+lines keep resume sane (rebuild from messages, not from thousands of deltas) while still letting the
+log double as raw telemetry.
+**Rejected.** In-memory only (no resume/history); `bun:sqlite` store (heavier than a solo tool
+needs, a schema to own).
+
+## D9 — Interceptors v1: the four that ship
+**Decision.** The interceptor pipeline is **synchronous, per-delta**; each interceptor can
+**observe / rewrite / drop** an event or call `ctl.abort()` / `ctl.emit()`. Phase 1 ships **four**
+concrete interceptors so the seam has real users:
+1. **Token-tap → JSONL** — tees every `text`/`reasoning` delta + `usage` to the `.nerve/sessions`
+   sink as `delta` lines (telemetry/replay-debug; the canonical `msg` lines come from the session
+   itself — [D8](#d8--persistence-append-only-jsonl-per-session-resume-by-replay)).
+2. **Stop-guard** — watches `ctl.text`; `ctl.abort()`s the in-flight fetch the instant a
+   configurable banned/terminal pattern appears (the canonical token-saving demo of interception).
+3. **Reasoning router** — routes `reasoning` deltas (DeepSeek reasoner / Gemini thinking) to a
+   dimmed/foldable TUI region, distinct from answer text.
+4. **Secret redaction** — scrubs secret/token patterns from deltas *before* they reach the UI or
+   the JSONL log, so an echoed key never persists.
+**Why.** A mechanism with no users is vaporware; these four exercise observe, abort, route, and
+rewrite respectively — the full capability surface.
+**Order is load-bearing.** Default array order `secret-redaction → reasoning-router → stop-guard →
+token-tap`: redaction must precede the tap and the TUI (or a secret is logged/shown before it's
+scrubbed), and the tap runs last so it records the final post-transform event.
+**Rejected (deferred).** Early-tool-dispatch (recognizing a completed tool_call before `done`);
+async interceptors (would block the hot per-delta path — sync stays fast and predictable).
+
+## D10 — LSP support: both seams, raw zero-dep client, schema-backed config
+**Decision.** nerve integrates the **Language Server Protocol** at **two seams**:
+1. **Automatic diagnostics.** After `edit`/`write` (and on `read`), nerve queries the matching
+   language server and **appends a formatted diagnostics block** (errors/warnings with line refs)
+   to the tool result — so the agent sees immediately whether it broke the file and self-corrects.
+2. **An `lsp` query tool** — one tool with an `operation` enum: `goToDefinition`, `findReferences`,
+   `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, and call-hierarchy
+   (`prepareCallHierarchy`/`incomingCalls`/`outgoingCalls`). Args: `filePath`, `line`, `character`
+   (1-based, editor coords), plus `query` for `workspaceSymbol`. It is `readonly: true`, so it
+   works in **PLAN mode** too — navigation/context-gathering and diagnosis are read-only.
+
+**Client.** A **raw JSON-RPC-over-stdio** client, **zero dependencies** (~200 lines): `Bun.spawn`
+the server, Content-Length framing, request↔response id correlation, `textDocument/didOpen` +
+`didChange` document sync, cache `publishDiagnostics` by URI, and the `initialize`/`shutdown`
+lifecycle. Lives in `src/lsp/` (`client.ts` = transport+lifecycle, `index.ts` = manager: extension
+routing, lazy spawn, diagnostics formatting, query ops).
+
+**Config.** A committed **`config/lsp.json`** (+ **`config/lsp.schema.json`** via inline `$schema`,
+IntelliSense like `models.json`) maps `extensions → { id, command, args, rootMarkers? }`. Servers spawn
+**lazily** on the first file of a matching type, are kept warm, and are killed on exit. nerve does
+**not** install servers — `command` must be on PATH. Seeded with **TypeScript**
+(`typescript-language-server --stdio`), since nerve itself is TS, so post-edit diagnostics directly
+serve the self-hacking mandate ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
+
+**Why.** Diagnostics-on-edit is the single highest-frequency win for a coding agent (catch breakage
+without a round-trip through `bash tsc`); the query tool is high-reuse for context-gathering
+([D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)). Raw client keeps it
+dependency-free and fully hackable, matching the raw-fetch provider ethos. Schema-backed JSON config
+stays consistent with [D5](#d5--model-selection-keys-in-env-models-in-a-committed-catalog).
+**Rejected.** A `vscode-jsonrpc`/full LSP client library (deps + less hackable); auto-detecting
+servers from PATH (implicit/magic); diagnostics-only or query-only (the user wants both seams).
+**Phase.** Built in **Phase 2**, after the Phase 1 core loop + tools work end to end (LSP depends on
+`read`/`edit`/`write` and the registry existing). Designed now so the tool surface accounts for it.
+
+## D11 — Bootstrapping: Claude Code builds a trustworthy kernel, then nerve self-hosts
+**Decision.** nerve is built by **self-hosting**, but not from zero. **Claude Code (Phase 1)
+hand-builds the minimum *trustworthy* coding agent plus all safety/guardrail machinery.** The
+moment nerve can do a reliable **edit → run → verify** cycle, **nerve builds, extends, and
+"perfects" itself**, with Claude Code as reviewer + rescue. Self-hosting is a gradient that starts
+as early as the kernel allows, not a switch thrown at a phase boundary.
+
+**Hand-built (Phase 1 kernel):** re-entrant `loop`; **DeepSeek** streaming client; `StreamEvent`
+contract + `stream.ts` (SSE + interceptor mechanism + the token-tap interceptor); tools
+`read`/`write`/`edit` (hashline)/`bash`/`manual` (self-docs, [D13](#d13--self-documentation-a-manual-tool-over-docsmanual-the-operators-manual)) + seed
+`docs/manual/` pages for the kernel subsystems; dispatcher + **PLAN/YOLO modes**; `session` + JSONL
+persistence; a usable TUI; and the **guardrails — `git init`, a `bun test` + `bun run typecheck`
+gate, and safe hot-reload (roll back to the old module on a failed import).**
+**Kernel simplification:** start the kernel with DeepSeek `thinking:{type:"disabled"}` — V4 defaults
+thinking **on**, which would force `reasoning_content` replay on the very first tool turn
+([providers.md §1.6](providers.md)). Defer thinking (and its replay machinery) until the kernel
+works; turn it on per-profile afterwards.
+
+**nerve self-hosts (Claude reviews/rescues):** the **Gemini provider — the first self-hosted task**
+(mirror the `Provider` contract; obvious done-condition, near-zero blast radius); then
+`grep`/`glob`/`ls`, the remaining interceptors (stop-guard, reasoning-router, secret-redaction),
+TUI polish, **LSP (Phase 2)**, subagents, and ongoing hardening/refactors.
+
+**Why.** (1) **Bootstrap paradox** — you can't self-build the kernel that enables self-building;
+the Phase-1 kernel must be hand-built. (2) **Never let the agent author its own guardrails** — the permission
+boundary (esp. [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch): the model
+can't switch its own mode) and safe-reload are the containment for nerve's mistakes. (3)
+**Contained, attributable failures** — a bug in a nerve-authored feature on a trusted core is easy
+to localize; a bug in a nerve-authored kernel is not (debugging the tool with the tool on a
+foundation neither trusts). (4) **The proof is self-refactor, not self-birth** — "perfection" =
+reshaping a loop that already runs (nerve's differentiating claim), not greenfielding it. The first
+task (Gemini) exercises exactly that on a small, verifiable scope, and surfaces any
+*nerve-legibility* problems in the core at the earliest, cheapest moment.
+
+**Metric.** Track **% of commits authored by nerve vs. Claude Code**. The crossover, and the first
+non-trivial feature nerve lands on itself (the **LSP client** is the natural trophy), are the
+milestones that validate the self-hackability thesis.
+
+**Rejected.** nerve building its own Phase 1 kernel (bootstrap paradox + agent-authored guardrails +
+uncontained failures); Claude Code building everything through Phase 2 (defeats the purpose; misses
+early discovery of nerve-legibility problems).
+
+**Hard prerequisites this creates.** `git init` **before any self-hosting** (version control is the
+undo button for self-surgery; hashline hard-reject only guards *stale* corruption, not *logic*
+corruption). And `/reload` MUST `try/catch` the dynamic import and keep the old module on failure
+(typecheck-before-swap preferred) — promoted from micro-default to requirement once nerve self-edits.
+
+## D12 — Claude compatibility: load CLAUDE.md + skills from `~/.claude` and `./.claude`
+**Decision.** nerve **reuses the Claude Code ecosystem** rather than inventing a parallel one. On
+startup (`src/context.ts`) it discovers and layers two things:
+1. **Instructions / memory (`CLAUDE.md`).** Loaded and concatenated into the system context in
+   precedence order *(user → project; project augments/overrides)*:
+   `~/.claude/CLAUDE.md` (user-global) → `./.claude/CLAUDE.md` and/or `./CLAUDE.md` (project),
+   resolving `@path` includes the way Claude Code does. The effective system prompt =
+   `prompts/system.md` (nerve's own base) **+** the layered `CLAUDE.md`s.
+2. **Skills.** Discover skill folders at `~/.claude/skills/*/` and `./.claude/skills/*/`, each a
+   `SKILL.md` with YAML frontmatter (`name`, `description`). Only **name + description** sit in
+   context (cheap, progressive disclosure); invoking a skill injects its full `SKILL.md` body (and
+   referenced files) for that turn — the same model Claude Code uses.
+
+**Why.** Zero-cost reuse of assets the user already has (the `.claude/skills/opentui` skill is
+immediately available; so is any `~/.claude` setup), it's genuinely lean (file discovery + concat +
+lazy body-load, no framework), and it keeps nerve's own config in the conventional place — which is
+why [the operating guide moved to `.claude/CLAUDE.md`](#) and nerve dogfoods its own loader on it.
+**Scope (minimal subset).** Parse `name`/`description` frontmatter + inject the body on invoke.
+**Ignore** advanced Claude skill frontmatter (`allowed-tools`, model pins, etc.) for now — add only
+if a real need appears. No marketplace, no remote fetch, no auto-install.
+**Rejected.** A bespoke nerve-only prompt/skill format (throws away the user's existing ecosystem);
+loading every CLAUDE.md up the whole tree eagerly (load project + user; nested/subdir on demand later).
+**Phase.** `CLAUDE.md` layering is cheap and lands with the **Phase 1** system-prompt assembly;
+**skills** discovery + invocation is **Phase 2** (alongside LSP). Keep the loader a pure function of
+the filesystem so it hot-swaps with `/reload` like the other seams ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
+
+## D13 — Self-documentation: a `manual` tool over `docs/manual/` (the operator's manual)
+**Decision.** nerve ships an **operator's manual it reads before modifying itself** — the
+self-hackability prime directive ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)) made operational.
+- **`manual` tool** (`readonly: true`, so it works in PLAN). `manual()` → an auto-discovered **topic
+  index**; `manual("<topic>")` → that page. The index is a **pure function of the filesystem** —
+  topics = `docs/manual/*.md` (per-subsystem "how to change X" pages) **+** the existing `docs/*.md`
+  (architecture, decisions, agent-rules, providers) **+** `opentui` (and sub-paths) sourced from the
+  vendored `.claude/skills/opentui` tree. Drop a `.md` in `docs/manual/`, it's discoverable — no registration.
+- **`docs/manual/` pages are thin and pointer-style:** *what it is · which file · how it works
+  (briefly) · how to change it · gotchas · see DECISIONS Dn / ARCHITECTURE_BRIEF §n.* Thin so they
+  point at the authoritative code + decisions instead of duplicating them (what makes self-docs rot).
+- **OpenTUI is lazy, pulled *through* the manual.** It is **not** always-loaded (it'd waste context
+  when irrelevant). `manual("opentui")` (or the `tui` page, which points there) surfaces the skill's
+  `SKILL.md` routing table + `docs/**/*.mdx` on demand, so the agent reads the API exactly when it's
+  about to touch the UI. (The vendored skill stays read-only upstream reference; nerve's *own* `tui`
+  manual page is the editable part.)
+- **Self-maintaining (anti-drift).** Pages are plain markdown edited with the normal hashline `edit`
+  tool. The rule ([AGENT_RULES §2](AGENT_RULES.md)): **a change to a subsystem updates its
+  `docs/manual/` page in the same commit.** Reading is PLAN-safe; editing a page is a mutation (YOLO),
+  consistent with everything else.
+**Why.** For nerve to self-host ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts))
+the agent (often a *weaker* model) must be able to look up "how does X work / how do I change it"
+before editing X — code legibility alone isn't enough. A dedicated tool (vs. plain `read`) carries
+the topic index in its description, returns curated pages, and saves tokens — it earns its rent ([D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)).
+**Rejected.** Always-loading opentui (context waste); reusing only `docs/` without task-oriented
+pages (it's "how it fits/why", not "how to change X"); co-locating `.md` beside each `src/` module
+(scatters docs, two homes); a separate write-mode on the tool (the `edit` tool already edits markdown).
+**Phase.** The `manual` tool + opentui federation ship in **Phase 1** (the kernel needs them to
+self-host). Per-subsystem pages are authored **alongside their code** (manual page ships in the same
+commit as the subsystem), so the manual grows with — and never ahead of — the implementation.
+
+---
+
+## Standing micro-defaults (low-risk, stated so they're not guessed)
+- **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
+  `Ctrl+C` exits the app.
+- **Mode switch:** `Shift+Tab` cycles PLAN ↔ YOLO (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)).
+- **Hot reload:** `/reload` command + keybind (`Ctrl+R`) ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
+  Must roll back to the old module on a failed import once nerve self-edits ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
+- **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).
+- **Tool shape:** `{ name, description, parameters (JSON Schema), readonly: boolean, run(args, ctx) }`.
+  JSON Schema maps cleanly to Gemini `functionDeclarations` and DeepSeek `tools`.
+- **Working dir:** wherever nerve is launched (self-hacks when launched in the nerve repo, [D1](#d1--primary-purpose-personal-coding-agent)).
+- **Turn cap:** a configurable max tool-iteration bound per turn as a runaway safety net.
