@@ -3,10 +3,13 @@ import type { Tool } from "./types.ts";
 
 const TIMEOUT_MS = 120_000;
 const MAX_OUTPUT = 30_000;
+// Run via the user's login shell (zsh on this setup), not hardcoded bash. Non-interactive (`-c`), so
+// it doesn't source rc files — same as before, just zsh semantics. `SHELL` is verified at startup.
+const SHELL = Bun.env.SHELL || "zsh";
 
 export const bash: Tool = {
   name: "bash",
-  description: "Run a shell command (bash -c) and return its combined stdout + stderr.",
+  description: "Run a shell command (via the user's shell, zsh) and return its combined stdout + stderr.",
   parameters: {
     type: "object",
     properties: {
@@ -21,7 +24,7 @@ export const bash: Tool = {
     if (typeof args.command !== "string") return "Error: 'command' must be a string";
     const cwd = resolve(ctx.cwd, typeof args.cwd === "string" ? args.cwd : ".");
 
-    const proc = Bun.spawn(["bash", "-c", args.command], { cwd, stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([SHELL, "-c", args.command], { cwd, stdout: "pipe", stderr: "pipe" });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

@@ -17,7 +17,8 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `read` emits `hashline.encode` (`LINE#HASH:content`); `edit` drives `hashline.applyEdits` and, on a
   stale anchor, returns the rejection + fresh anchors; on success (small files) it echoes updated
   anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`).
-- `bash` runs `bash -c` via `Bun.spawn` (combined stdout+stderr, 2-min kill timeout, output capped).
+- `bash` runs `$SHELL -c` (zsh on this setup, falls back to `zsh`) via `Bun.spawn` (combined
+  stdout+stderr, 2-min kill timeout, output capped). The shell is verified at startup (`preflight`).
   `ls`/`glob`/`grep` are readonly search — `Bun.Glob` for matching, pure-JS line scan for grep
   (dependency-free; skips `node_modules`/`.git`/`references`/binary/huge files). `bash` is *not*
   interruptible by ESC yet (only the timeout stops it) — `ToolContext` has no signal.
