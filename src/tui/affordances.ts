@@ -51,9 +51,10 @@ export async function atSuggestions(query: string, cwd: string, limit = 12): Pro
   } catch {
     return [];
   }
+  const lp = prefix.toLowerCase();
   const showDot = prefix.startsWith(".");
   return entries
-    .filter((e) => e.name.startsWith(prefix) && !AT_IGNORE.has(e.name) && (showDot || !e.name.startsWith(".")))
+    .filter((e) => e.name.toLowerCase().startsWith(lp) && !AT_IGNORE.has(e.name) && (showDot || !e.name.startsWith(".")))
     .map((e) => dirPart + e.name + (e.isDirectory() ? "/" : ""))
     .sort()
     .slice(0, limit);

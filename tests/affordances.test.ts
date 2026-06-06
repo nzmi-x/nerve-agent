@@ -40,6 +40,7 @@ afterEach(async () => {
 test("atSuggestions: completes paths; dirs get '/'; dotfiles hidden unless asked", async () => {
   expect(await atSuggestions("src/", dir)).toEqual(["src/providers/", "src/stream.ts"]);
   expect(await atSuggestions("RE", dir)).toEqual(["README.md"]);
+  expect(await atSuggestions("re", dir)).toEqual(["README.md"]); // case-insensitive
   expect(await atSuggestions("", dir)).toEqual(["README.md", "src/"]); // .hidden excluded
   expect(await atSuggestions(".", dir)).toEqual([".hidden"]); // dot prefix opts in
   expect(await atSuggestions("nope/", dir)).toEqual([]); // missing dir

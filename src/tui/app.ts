@@ -77,6 +77,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
+  let echoGuard: string | null = null; // value we just set programmatically — ignore its INPUT echo once
 
   // --- layout ---------------------------------------------------------------
   const root = new BoxRenderable(renderer, { id: "root", width: "100%", height: "100%", flexDirection: "column" });
@@ -157,9 +158,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   function acceptSuggestion(): void {
     const it = suggest.items[suggest.sel];
     if (!it) return;
-    input.value = suggest.kind === "at" ? applyAtSuggestion(input.value, it.insert) : `/${it.insert} `;
+    const next = suggest.kind === "at" ? applyAtSuggestion(input.value, it.insert) : `/${it.insert} `;
+    echoGuard = next; // suppress the INPUT echo from this set so the popup stays closed
+    input.value = next;
     clearSuggest();
-    void updateSuggestions(input.value);
+    // popup closes on accept; type another char to re-suggest (e.g. to drill into the accepted dir)
   }
 
   // --- ask_user picker (ctx.ask) -------------------------------------------
@@ -337,7 +340,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   }
 
   // --- events ---------------------------------------------------------------
-  input.on(InputRenderableEvents.INPUT, (value: string) => void updateSuggestions(value));
+  input.on(InputRenderableEvents.INPUT, (value: string) => {
+    if (echoGuard !== null && value === echoGuard) {
+      echoGuard = null; // this INPUT is the echo of our own set — don't re-open the popup
+      return;
+    }
+    echoGuard = null;
+    void updateSuggestions(value);
+  });
   input.on(InputRenderableEvents.ENTER, (value: string) => {
     if (!asking) void submit(value);
   });
