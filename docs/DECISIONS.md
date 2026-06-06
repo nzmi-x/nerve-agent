@@ -292,8 +292,10 @@ popup rendering + key handling live in `app.ts`.
   PLAN/EDIT gate** (that gate governs the *model*; the human is trusted), shows the output, and does
   **not** add it to the conversation (a side-glance that doesn't spend context). No suggestions (freeform).
 - **`/command` — commands + skills.** Autosuggests built-ins (`help`, `model`, `mode`, `clear`,
-  `drop`, `resume`, `quit`) **+** discovered skills (name/description from `~/.claude` + `./.claude`
-  `SKILL.md` frontmatter — a partial [D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)). Skill *invocation* is deferred to Phase 2; listing works now.
+  `compact`, `sessions`, `resume`, `drop`, `quit`) **+** discovered skills (name/description from `~/.claude` +
+  `./.claude` `SKILL.md` frontmatter — a partial [D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude))
+  **+** markdown command files ([D16](#d16--markdown-slash-commands-arguments-templates-claudenerve-compatible)).
+  Skill *invocation* is deferred to Phase 2; file-command expansion and listing work now.
 - **`/drop`** deletes the current session file and starts a fresh one — for throwaway sessions that
   shouldn't clutter history (distinct from `/clear`, which only clears the transcript view).
 **Why.** Matches the affordances every terminal agent has; keeping the logic pure makes the part I
@@ -305,10 +307,185 @@ suggestions: Phase 2. Interactive rendering needs a real-terminal verification p
 
 ---
 
+> **D15–D20 provenance.** Added after surveying the three reference harnesses (claude-code,
+> opencode, **oh-my-pi**) for features worth borrowing. The filter was nerve's charter: lean,
+> two-provider, self-hackable, *no framework bloat*. D15–D18 are adopted (Phase-1.5, building now);
+> D19 is a blessed-but-deferred signature capability; D20 records what was surveyed and deliberately
+> left out so it isn't re-litigated.
+
+## D15 — Resilience: transient-error auto-retry with model-ladder fallback
+**Decision.** A failed turn caused by a **transient** provider error (HTTP 429/500/502/503/504,
+"overloaded", rate/usage limit, socket/timeout/connection-reset/`fetch failed`) is **retried
+automatically** instead of surfacing as a dead turn. Mechanism, all in the re-entrant `loop`
+([D6](#d6--subagents-deferred-but-the-loop-must-be-re-entrant)):
+- Classification is a **pure regex function** (`src/retry.ts` `isTransient(error)`) over the error
+  message — string-pattern, not typed provider codes (we have two providers; patterns are enough).
+- On a transient error the partial assistant turn is **discarded** (`Session.discardAssistant()`,
+  never committed) and the turn is re-attempted. Backoff is exponential
+  (`baseDelayMs · 2^n`, default 1s→2s, capped at `maxDelayMs`), abortable by ESC.
+- **Model-ladder fallback (the on-brand twist).** nerve already has a complexity ladder
+  ([D5](#d5--model-selection-keys-in-env-models-in-a-committed-catalog)). On a transient error nerve
+  first tries the **next implemented, keyed model down the catalog** (delay 0) before sleeping on the
+  same one — a rate-limited `deepseek-v4-flash` falls to `v4-pro`, etc. The loop takes a
+  `fallbacks: Candidate[]` ladder; the caller builds it from the catalog (`fallbacksFor` in
+  `config.ts`), skipping unimplemented (`gemini`) / unkeyed entries.
+- **Context overflow is explicitly NOT retried here** — that's compaction's job
+  ([D17](#d17--context-maintenance-lean-compaction--tool-output-pruning)). `isTransient` excludes it.
+- Surfaced via new loop callbacks `onRetry(info)` / `onError(error)` (the loop stops forwarding raw
+  `error` StreamEvents to `onEvent`); the TUI shows a dim "↻ retrying" and a red final error.
+**Why.** A self-hosting agent left to run unattended must survive a provider hiccup without a human
+re-poking it; both DeepSeek and Gemini rate-limit. Fallback reuses the ladder we already maintain, so
+resilience costs almost no new concept. ~40 lines + a pure classifier; this is one of the two things
+worth landing *before* handing the wheel to nerve.
+**Rejected.** Throwing/dead-turn on any error (the status quo — unattended runs die on a 429);
+typed provider-error codes (over-built for two providers); retrying context-overflow here (wrong
+remedy — loops forever on the same too-big input); unbounded retries (a `maxRetries` + `maxDelayMs`
+cap fails loud instead).
+**Phase.** **Now (Phase 1.5).** Auto-threshold/idle variants and cross-provider fallback land when
+the Gemini provider exists.
+
+## D16 — Markdown slash commands (`$ARGUMENTS` templates), Claude/nerve compatible
+**Decision.** `/<name>` resolves a **markdown command file** the same way skills are discovered
+([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)): scan
+`~/.claude/commands/*.md` + `./.claude/commands/*.md` (and nerve's own `.nerve/commands/`), parse
+optional `name`/`description` frontmatter, and on invocation **expand the body into a prompt** with
+substitution: `$1 $2 …` positional, `$@`/`$ARGUMENTS` for all args, the rest verbatim. The expanded
+text is submitted as if the user typed it. Discovery + expansion are **pure** (`src/commands.ts`,
+unit-tested); the TUI only routes. A built-in `/command` name always wins over a file of the same name.
+**Why.** nerve already discovers skills and is Claude-compatible — file commands are the natural
+sibling and pure leverage on work already done (`affordances.ts` already lists `/` suggestions). Lets
+the user (and nerve) capture repeatable prompts as plain files, shareable with their Claude Code setup.
+~30 lines of pure code + one wiring point.
+**Rejected.** A bespoke command DSL (throws away Claude-compat); executing commands as code/hooks
+(that's a heavier extensibility surface — see [D20](#d20--surveyed-and-deliberately-deferred-or-rejected));
+inline backslash-escape grammar (kept the arg splitter simple/quote-aware like oh-my-pi's).
+**Phase.** **Now (Phase 1.5).** Listing already works; this adds the expand-on-submit path.
+
+## D17 — Context maintenance: lean compaction + tool-output pruning
+**Decision.** Long sessions stay usable via **one** mechanism kept deliberately small (oh-my-pi has a
+full tree/branch/handoff machine; we take the 20% that gives 80%):
+- **Compaction.** `/compact [focus]` summarizes everything older than the most recent
+  `keepRecentTokens` worth of messages into a **single summary**, then rebuilds live context as
+  `[system, summaryAsUser, …recentMessages]`. The summary is produced by a one-shot drain of the
+  provider stream (`summarize()` in `src/compaction.ts`, system prompt `prompts/compaction.md`).
+- **Persistence ([D8](#d8--persistence-append-only-jsonl-per-session-resume-by-replay)).** A new
+  typed line `{"t":"compaction","summary","firstKept":<ordinal>}` where `firstKept` is the ordinal
+  (position among all `msg` lines ever written) of the first kept message. Resume uses the **latest**
+  compaction marker: `messages = [summaryUser] + allMsgs.slice(firstKept)`. The append-only log is
+  never rewritten; live `session.messages` and the global ordinal are tracked independently.
+- **Cut point.** Never cut in the middle of a tool exchange — the boundary is snapped back to a
+  `user`/`assistant` message so a `tool` result is never orphaned from its call.
+- **Tool-output pruning (cheap companion).** `pruneToolOutputs()` replaces stale large `tool`
+  results with `[output truncated — N tokens]`, protecting the newest ~40k tokens and **never**
+  pruning `read` results (their `LINE#HASH` anchors must stay valid for `edit`, [D3](#d3--edit-mechanism-hashline-only-content-anchored)).
+**Why.** Even at 1M context, unattended self-hosting sessions will overflow; nerve had **resume but
+no compaction at all** — the one genuine capability gap the survey surfaced. Manual `/compact` first
+(observable, safe); a token-threshold auto-trigger is a later flip of the same switch.
+**Rejected.** oh-my-pi's full machine — session **tree**, **branch summaries**, split-turn handling,
+**handoff**-to-new-session, remote/native compaction endpoints (all real, all bloat for a solo linear
+session; revisit tree/handoff only if a concrete need appears, [D20](#d20--surveyed-and-deliberately-deferred-or-rejected));
+rewriting the JSONL on compaction (breaks append-only/greppable); pruning `read` outputs (would
+invalidate hashline anchors).
+**Phase.** **Now (Phase 1.5)** for `/compact` + pruning + resume; **auto-threshold** trigger deferred.
+The summary call needs a live-model verification pass (the pure cut/prune/rebuild are unit-tested).
+
+## D18 — Destructive-command guard: a mode-independent safety floor on `bash`
+**Decision.** A small **pure** blocklist (`dangerousCommand(cmd)` in `dispatch.ts`) hard-refuses a
+handful of catastrophic shell patterns — `rm -rf /` / `~` / `*`, fork bombs, `mkfs`, whole-disk `dd`,
+`> /dev/sda`, writes to `/etc/passwd`, `:(){ :|:& };:`, `curl|sh` / `wget|sh` pipe-to-shell — **in
+both PLAN and EDIT modes**, for the **model's `bash` tool only**. It runs inside `dispatch` before
+execution and returns a `Refused (guard): …`.
+**Why.** EDIT mode auto-runs **everything** ([D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch));
+a self-hosting agent that fat-fingers `rm -rf` shouldn't be able to wipe the machine while you're
+away. This is an **orthogonal safety floor**, not a permission tier — it does **not** touch the
+human-only mode switch (D4 stays intact) and does **not** gate the human's `!`-shell escape
+([D14](#d14--tui-input-affordances--files--shell--commands-with-autosuggest): the human is trusted).
+It is a hand-built guardrail and stays that way ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
+**Rejected.** oh-my-pi's full per-tool approval tiers (`read`/`write`/`exec` + per-tool prompt policy)
+— that's a y/n confirm UI + policy layer nerve deliberately rejected in [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch);
+a guard that prompts (nerve's loop never blocks mid-turn — it hard-refuses instead); making it
+model- or config-editable (it's a guardrail; agent-authored guardrails are forbidden).
+**Phase.** **Now (Phase 1.5).** The pattern list grows by judgement, recorded here.
+
+## D19 — TTSR ("stream rules"): blessed, deferred — nerve's signature interception capability
+**Decision.** **Deferred, but recorded as the intended headline feature**, because it's the purest
+expression of what nerve *is*. TTSR = user-defined **regex rules that watch the live token stream**;
+on a match the turn is **aborted mid-generation** and a `<system-interrupt>` correction is injected
+before the model continues. This is exactly nerve's "splice into the wire mid-thought" thesis and a
+direct generalization of the existing **stop-guard** interceptor ([D9](#d9--interceptors-v1-the-four-that-ship)):
+stop-guard already aborts on a banned pattern — TTSR adds a **rules file** + a **re-inject + continue**.
+**Why deferred.** It earns a DECISIONS slot now so the design space is claimed and the stop-guard isn't
+"finished" in a way that blocks it, but it depends on the reasoning-artifact replay being solid across
+both providers (re-injecting mid-turn must not corrupt DeepSeek `reasoning_content` / Gemini
+`thoughtSignature` replay), which wants the Gemini provider to exist first.
+**Rejected.** Building it before the second provider (replay-safety unproven); folding it into
+stop-guard as a config flag (it deserves its own rules format + interrupt template).
+**Phase.** After the Gemini provider lands and replay is proven on both. Likely nerve-authored, since
+it's an interceptor seam ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)) — a strong self-hack trophy.
+
+## D20 — Surveyed and deliberately deferred or rejected
+**Decision.** From the same survey, the following were considered and **left out**, with the reason,
+so they aren't re-proposed without new information:
+- **Todo-list tool + reminder** (claude-code `TodoWrite`, oh-my-pi `todo_reminder`) — *defer, likely
+  adopt.* A structured checklist the model maintains over long multi-step work; just one more tool
+  ([D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)). Cheap; not load-bearing
+  for the kernel, so it waits until self-hosting exercises long tasks.
+- **Queued / steering input** (type the next instruction while streaming; `followUp`/`steer`) —
+  *defer.* Nice TUI UX, pure front-end (a pending-message buffer), no engine change. Add during a
+  TUI-polish pass.
+- **Handoff** (summarize → brand-new session) — *defer in favour of [D17](#d17--context-maintenance-lean-compaction--tool-output-pruning).*
+  Overlaps compaction; pick one first. Revisit if "fresh session, carried context" becomes a real need.
+- **Session tree / `/branch` / `/tree`** — *defer (heavy).* Turns the linear append-only JSONL
+  ([D8](#d8--persistence-append-only-jsonl-per-session-resume-by-replay)) into a tree model. Real
+  power, large complexity; only if branch-exploration becomes a felt need.
+- **Autonomous cross-session memory** (oh-my-pi `memory://`, background extraction → `MEMORY.md`) —
+  *defer.* Two model passes + a SQLite job queue; nerve already gets project memory from Claude-compat
+  `CLAUDE.md` ([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)). Too
+  much machinery for the value right now.
+- **Claude-compatible external hooks** (`.claude/hooks/pre|post`) — *defer.* nerve's hot-swappable
+  interceptors ([D7](#d7--self-hacking-runtime-hot-swap-of-seams), [D9](#d9--interceptors-v1-the-four-that-ship))
+  are the in-house equivalent; only add external-script discovery to *share* hooks with Claude Code.
+- **opencode "Context Epochs"** (inject mid-conversation system messages when effective state — date,
+  model — changes, preserving the provider cache prefix) — *note only.* Elegant and relevant to our
+  replay concerns, but a sophisticated abstraction; not worth its weight yet.
+- **Hard-rejected (charter violations):** MCP, plugin marketplaces, multi-agent coordinators/teams,
+  voice, remote agents, IDE bridge, x402 payments, auto-dream. These are exactly the "provider
+  zoo / generic framework" bloat the [README](../README.md) and [AGENT_RULES](AGENT_RULES.md) reject.
+  Not deferred — **out of scope by design.**
+**Why.** Recording the *no*s (with reasons) is as load-bearing as the *yes*es — it stops a future
+session (human or nerve) from re-litigating settled scope.
+
+## D21 — Default communication style: caveman, in the system prompt (not a skill)
+**Decision.** nerve's **default output style is "caveman"** — terse, fragments, drop
+articles/filler/pleasantries, full technical substance kept exact (code/errors/paths verbatim). It
+lives **in the shipped system prompt** (`prompts/system.md`), on by default, no opt-in. The prompt
+also tells the model to **drop caveman for one response** when the user asks to explain *in detail /
+comprehensively / thoroughly*, for safety-critical confirmations, for misread-prone multi-step
+sequences, or when asked to clarify — then resume.
+**Why.** The user wants it always-on and shipped with the harness, droppable on request. A **system
+message** is the leanest home: it needs no skill-injection mechanism, no always-apply flag, no per-turn
+body loading — just text in the prompt that already feeds every turn ([D12 note](#)) and hot-swaps via
+the file. Saves output tokens by default; the drop-rule keeps detailed explanations readable.
+**Rejected.** A **skill** marked `alwaysApply`/`default` (the user's first idea, then reversed): that
+needs a real always-on skill-injection seam (discover body → inject into system prompt → toggle) — more
+machinery than a default style warrants, and skill *invocation* is otherwise deferred to Phase 2 ([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)).
+A separate "output styles" subsystem (claude-code has one) — overkill for one default.
+**Note.** It reads oddly at a glance (terse caveman prose) — **intentional, not a bug**; don't "fix"
+it. The system prompt is agent-editable/hot-swappable, so the style can be tuned by editing the file.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app.
-- **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)).
+- **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch));
+  plain `Tab` also toggles it **when no autosuggest popup is open** (popup-`Tab` accepts the suggestion).
+- **Shell:** the model's `bash` tool and the `!`-shell escape run via the user's shell — `Bun.env.SHELL`
+  (zsh on this setup), falling back to `zsh` — not hardcoded `bash`. Non-interactive (`-c`); no rc sourcing.
+- **Startup preflight:** `index.ts` checks required external deps on PATH (the shell + `git`) and exits
+  with a clear error if any is missing — nerve shells out to them, so fail fast over failing mid-task.
+- **Sessions:** `/resume [id]` switches to an existing session (default = most recent that isn't the
+  current one); `/sessions` lists them; `/sessions delete <id>` removes one (not the current — that's `/drop`).
 - **Hot reload:** `/reload` command + keybind (`Ctrl+R`) ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
   Must roll back to the old module on a failed import once nerve self-edits ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
 - **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).
