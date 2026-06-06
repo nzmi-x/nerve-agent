@@ -19,7 +19,7 @@ const arg = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 
-const mode: Mode = arg("--mode") === "plan" ? "plan" : "yolo";
+const mode: Mode = arg("--mode") === "plan" ? "plan" : "edit";
 const prompt = arg("-p") ?? arg("--print");
 const resume = arg("--resume");
 

@@ -19,7 +19,7 @@ export interface CommandInfo {
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
   { name: "model", description: "Switch model — /model <id>" },
-  { name: "mode", description: "Set mode — /mode plan|yolo" },
+  { name: "mode", description: "Set mode — /mode plan|edit" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "drop", description: "Delete this session and start a fresh one" },
   { name: "resume", description: "Resume is a launch flag — --resume <id>|last" },

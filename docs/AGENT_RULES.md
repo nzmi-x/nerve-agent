@@ -83,9 +83,9 @@ loop — change the harness while it runs?**
 
 ## 5. Safety boundaries the model cannot cross
 
-- **The model never changes the permission mode.** PLAN ↔ YOLO is a *human-only* switch
+- **The model never changes the permission mode.** PLAN ↔ EDIT is a *human-only* switch
   (`Shift+Tab`), enforced in the dispatcher. Do **not** add a `set_mode` tool, a config the model
-  can write to flip it, or any path that lets the agent escalate PLAN → YOLO. The boundary is the
+  can write to flip it, or any path that lets the agent escalate PLAN → EDIT. The boundary is the
   point.
 - **PLAN mode is read-only, conservatively.** Mutations are hard-blocked. Bash in PLAN runs only
   for *obviously-safe, single-program* commands with no shell metacharacters — never widen this by

@@ -25,7 +25,7 @@ If an abstraction doesn't pay rent today, it isn't here. The *why* of every choi
   at hash anchors instead of retyping lines (fewer tokens), and a stale read is hard-rejected
   before it can corrupt a file. Zero deps (`Bun.hash`).
 - **Two human-controlled modes:** **PLAN** (read-only — read tools + obviously-safe bash) and
-  **YOLO** (everything auto). Switched only by you (`Shift+Tab`); the model can't escalate.
+  **EDIT** (everything auto). Switched only by you (`Shift+Tab`); the model can't escalate.
 - **Hot-swap seams:** reload tools + interceptors live without losing the conversation.
 - **Resumable sessions:** append-only JSONL transcripts you can replay and grep.
 - **LSP code intelligence:** a raw, zero-dep Language Server client. `edit`/`write`/`read` append
@@ -98,7 +98,7 @@ nerve/
 │   ├── session.ts       # conversation state + append-only JSONL persistence
 │   ├── stream.ts        # SSE line parser + the synchronous interceptor pipeline (the "nerve")
 │   ├── interceptors.ts  # v1: token-tap, stop-guard, reasoning-router, secret-redaction (hot-swappable)
-│   ├── dispatch.ts      # tool dispatcher + PLAN/YOLO mode gate (human-only switch)
+│   ├── dispatch.ts      # tool dispatcher + PLAN/EDIT mode gate (human-only switch)
 │   ├── hashline.ts      # LINE#HASH anchoring via Bun.hash (powers read + edit)
 │   ├── lsp/             # raw JSON-RPC LSP client (client.ts) + manager (index.ts) — Phase 2
 │   ├── config.ts        # loads .env keys + config/models.json + config/lsp.json; active profile

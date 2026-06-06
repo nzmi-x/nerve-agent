@@ -1,14 +1,14 @@
 # modes
 
 **Status:** built (Phase 1)
-**What:** the PLAN/YOLO permission gate — the safety boundary on every tool call.
+**What:** the PLAN/EDIT permission gate — the safety boundary on every tool call.
 **Code:** `src/dispatch.ts` (tests: `tests/dispatch.test.ts`). One of the **hand-built** seams ([D11](../DECISIONS.md)).
 
 **How it works:**
-- Two modes: **PLAN** (read-only) and **YOLO** (everything auto). The mode is passed *into* `dispatch`
+- Two modes: **PLAN** (read-only) and **EDIT** (everything auto). The mode is passed *into* `dispatch`
   from the human-controlled TUI — there is **no** `set_mode` tool and **no** model-writable flag. The
   model cannot escalate ([D4](../DECISIONS.md)).
-- `allowed(tool, args, mode)` is the pure policy: YOLO → always ok; PLAN → `tool.readonly` ok, `bash`
+- `allowed(tool, args, mode)` is the pure policy: EDIT → always ok; PLAN → `tool.readonly` ok, `bash`
   via `planBashAllowed`, everything else (mutations) refused.
 - `planBashAllowed(command)`: rejects any shell **metacharacter** (`< > | ; & $ \` ( ) { }` newline),
   then requires the program to be an obviously-safe read-only one (`SAFE_PROGRAMS`), with `git`
@@ -23,7 +23,7 @@
 
 **Gotchas:**
 - The metachar filter is intentionally conservative: a quoted `;`/`$` in a legit filename/pattern is
-  rejected too. That's the safe failure — switch to YOLO or use a structured tool.
+  rejected too. That's the safe failure — switch to EDIT or use a structured tool.
 - Glob chars (`* ? [ ]`) are allowed (they only expand paths for read commands).
 
 **See:** [DECISIONS D4](../DECISIONS.md) · [DECISIONS D11 (hand-built seams)](../DECISIONS.md) · [tools](tools.md)

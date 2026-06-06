@@ -76,7 +76,7 @@ const syntaxStyle = SyntaxStyle.fromStyles({
 type Content = string | ReturnType<typeof t>;
 
 const HELP = [
-  "commands  /help · /model [id] · /mode plan|yolo · /clear · /drop · /balance · /resume · /quit",
+  "commands  /help · /model [id] · /mode plan|edit · /clear · /drop · /balance · /resume · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
   "keys      Enter send · Tab accept · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
 ].join("\n");
@@ -94,8 +94,9 @@ export interface TuiOptions {
 }
 
 interface Suggestion {
-  label: string;
-  insert: string;
+  name: string; // primary column (path or /command)
+  desc?: string; // secondary column (command description)
+  insert: string; // what Tab inserts
 }
 interface PopupRow {
   content: string;
@@ -215,17 +216,27 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
   const renderSuggest = (): void => {
     if (asking) return;
-    setPopup(suggest.items.map((it, i) => ({ content: it.label, fg: i === suggest.sel ? WHITE : MUTE, bg: i === suggest.sel ? SELBG : undefined, bold: i === suggest.sel })));
+    // dynamic columns: name column fits the longest name; description fills the rest of the width
+    const colW = Math.max(0, ...suggest.items.map((it) => it.name.length)) + 2;
+    const budget = Math.max(10, renderer.width - colW - 6);
+    setPopup(
+      suggest.items.map((it, i) => ({
+        content: it.desc ? `${it.name.padEnd(colW)}${trunc(it.desc, budget)}` : it.name,
+        fg: i === suggest.sel ? WHITE : MUTE,
+        bg: i === suggest.sel ? SELBG : undefined,
+        bold: i === suggest.sel,
+      })),
+    );
   };
   async function updateSuggestions(value: string): Promise<void> {
     if (asking) return;
     const aff = parseAffordance(value);
     if (aff.kind === "at") {
       const paths = await atSuggestions(aff.query, cwd);
-      suggest = { kind: "at", items: paths.map((p) => ({ label: p, insert: p })), sel: 0 };
+      suggest = { kind: "at", items: paths.map((p) => ({ name: p, insert: p })), sel: 0 };
     } else if (aff.kind === "slash") {
       const cmds = slashSuggestions(aff.query, skills).slice(0, MAX_POPUP);
-      suggest = { kind: "slash", items: cmds.map((c) => ({ label: `${`/${c.name}`.padEnd(13)}${trunc(c.description, 60)}`, insert: c.name })), sel: 0 };
+      suggest = { kind: "slash", items: cmds.map((c) => ({ name: `/${c.name}`, desc: c.description, insert: c.name })), sel: 0 };
     } else {
       suggest = { kind: "none", items: [], sel: 0 };
     }
@@ -245,7 +256,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const rows: PopupRow[] = [{ content: `? ${asking.req.question}`, fg: ACCENT, bold: true }];
     asking.req.options.forEach((o, i) => {
       const sel = i === asking!.sel;
-      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${trunc(o.description, 60)}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
+      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${trunc(o.description, Math.max(20, renderer.width - 28))}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
     });
     setPopup(rows);
   };
@@ -260,7 +271,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // --- status ---------------------------------------------------------------
   const setStatus = (): void => {
     const s = meter.snapshot();
-    const badge = mode === "yolo" ? bg(GREEN)(fg(DARKFG)(" YOLO ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
+    const badge = mode === "edit" ? bg(GREEN)(fg(DARKFG)(" EDIT ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
     status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? fg(YELLOW)("   ● streaming") : ""}`;
   };
 
@@ -316,11 +327,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return void drop();
       case "mode": {
         const m = args[0];
-        if (m === "plan" || m === "yolo") {
+        if (m === "plan" || m === "edit") {
           mode = m;
           setStatus();
           addText(`mode → ${m.toUpperCase()}`, MUTE);
-        } else addText("usage: /mode plan|yolo", MUTE);
+        } else addText("usage: /mode plan|edit", MUTE);
         return;
       }
       case "model": {
@@ -451,7 +462,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
 
     if (key.shift && key.name === "tab") {
-      mode = mode === "plan" ? "yolo" : "plan";
+      mode = mode === "plan" ? "edit" : "plan";
       setStatus();
       return;
     }

@@ -50,10 +50,10 @@ test("planBashAllowed: non-allowlisted programs are refused", () => {
 
 // --- allowed (policy) -------------------------------------------------------
 
-test("allowed: YOLO permits everything", () => {
-  expect(allowed(write, { path: "x", content: "y" }, "yolo").ok).toBe(true);
-  expect(allowed(bash, { command: "rm -rf /" }, "yolo").ok).toBe(true);
-  expect(allowed(edit, {}, "yolo").ok).toBe(true);
+test("allowed: EDIT permits everything", () => {
+  expect(allowed(write, { path: "x", content: "y" }, "edit").ok).toBe(true);
+  expect(allowed(bash, { command: "rm -rf /" }, "edit").ok).toBe(true);
+  expect(allowed(edit, {}, "edit").ok).toBe(true);
 });
 
 test("allowed: PLAN permits readonly tools + safe bash, blocks mutations", () => {
@@ -79,7 +79,7 @@ afterEach(async () => {
 });
 
 test("dispatch: unknown tool reports an error", async () => {
-  expect(await dispatch("nope", {}, "yolo", ctx)).toBe("Error: unknown tool 'nope'");
+  expect(await dispatch("nope", {}, "edit", ctx)).toBe("Error: unknown tool 'nope'");
 });
 
 test("dispatch: PLAN refuses a mutation and never touches the filesystem", async () => {
@@ -88,8 +88,8 @@ test("dispatch: PLAN refuses a mutation and never touches the filesystem", async
   expect(await Bun.file(join(dir, "a.txt")).exists()).toBe(false);
 });
 
-test("dispatch: YOLO runs the mutation; PLAN still runs a readonly tool", async () => {
-  expect(await dispatch("write", { path: "a.txt", content: "hi" }, "yolo", ctx)).toContain("Wrote a.txt");
+test("dispatch: EDIT runs the mutation; PLAN still runs a readonly tool", async () => {
+  expect(await dispatch("write", { path: "a.txt", content: "hi" }, "edit", ctx)).toContain("Wrote a.txt");
   expect(await Bun.file(join(dir, "a.txt")).text()).toBe("hi");
   // manual is readonly → allowed even in PLAN
   expect(await dispatch("manual", {}, "plan", ctx)).toContain("topics:");

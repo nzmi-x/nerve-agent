@@ -11,8 +11,8 @@
   `gemini` is `null` (nerve's first self-hosted task, [D11](../DECISIONS.md)) and throws a clear error.
 - `index.ts` (the kernel runner) boots: `loadModels → selectModel → providerFor`, builds a `Session`
   (or resumes), reads `prompts/system.md`, and drives `loop` — one-shot with `-p "…"` or a stdin REPL,
-  streaming to stdout (reasoning dimmed). Flags: `-p/--print`, `--model <id>`, `--mode plan|yolo`
-  (default yolo), `--resume <id>|last`. Kernel default: `thinking` off ([D11](../DECISIONS.md)).
+  streaming to stdout (reasoning dimmed). Flags: `-p/--print`, `--model <id>`, `--mode plan|edit`
+  (default edit), `--resume <id>|last`. Kernel default: `thinking` off ([D11](../DECISIONS.md)).
 
 **How to change it:**
 - Add a model → edit `config/models.json` (+ its schema); no code change.

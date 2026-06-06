@@ -9,7 +9,7 @@ DECISIONS.md** so it isn't re-litigated.
 **Build strategy ([DECISIONS.md D11](../docs/DECISIONS.md)):** nerve is **self-hosted**. Claude Code
 hand-builds the Phase-1 trustworthy kernel + all safety rails; then **nerve builds itself** (first
 task: the Gemini provider), with Claude reviewing/rescuing. Never let nerve author its own
-guardrails — the PLAN/YOLO boundary (the model can't change its own mode) and safe hot-reload are
+guardrails — the PLAN/EDIT boundary (the model can't change its own mode) and safe hot-reload are
 hand-built and stay that way. `git init` is a prerequisite before nerve self-edits.
 
 ## Commands
@@ -46,7 +46,7 @@ Run `bun run typecheck` before declaring a change done. There is no compile/bund
 
 ## Runtime behavior to respect
 
-- **Two modes, human-only switch (`Shift+Tab`):** PLAN (read-only) and YOLO (all auto). Enforced in
+- **Two modes, human-only switch (`Shift+Tab`):** PLAN (read-only) and EDIT (all auto). Enforced in
   `src/dispatch.ts`. **Never** add a way for the model to change the mode (no `set_mode` tool, no
   model-writable flag). PLAN allows read tools + obviously-safe single-program bash only.
 - **`edit` is hashline-only.** `read` emits `LINE#HASH:content`; edits anchor at hashes; a stale

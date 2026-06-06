@@ -19,7 +19,7 @@
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode plan|yolo /clear /drop /balance /resume /quit` + skill listing.
+- **Commands:** `/help /model [id] /mode plan|edit /clear /drop /balance /resume /quit` + skill listing.
 - **`ask_user`:** the loop's `ctx.ask` opens an interactive picker (↑/↓ + Enter) in the popup and
   blocks the turn until you choose; the recommended option is preselected.
 - **Keys:** Enter send · **Tab accept suggestion** · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit.

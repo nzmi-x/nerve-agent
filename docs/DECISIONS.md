@@ -54,10 +54,10 @@ the only place hashes are validated.
   *obviously-safe, single-program* bash commands (e.g. `git diff/log/status/show`, `ls`, `cat`,
   `rg`, `find`, `head`, `tail`, `wc`) with **no shell metacharacters** (`>`, `>>`, `|`, `;`,
   `&&`, `$(...)`, backticks, `tee`). Anything fancier is rejected. Mutations are hard-blocked.
-- **YOLO**: everything auto-runs, no confirmation.
+- **EDIT**: everything auto-runs, no confirmation.
 
 The mode switch is **human-only** (TUI keybind, Shift+Tab), enforced in the **tool dispatcher**.
-The model has **no `set_mode` tool** and cannot escalate PLAN → YOLO. Tools carry a `readonly`
+The model has **no `set_mode` tool** and cannot escalate PLAN → EDIT. Tools carry a `readonly`
 flag; the dispatcher gates on it (+ the bash allowlist) per mode.
 **Why.** The user wants a strict planning/Q&A mode and a fast mode, with the safety boundary
 under human control: "No self toggle, only I can switch modes." Classifying arbitrary shell as
@@ -187,7 +187,7 @@ as early as the kernel allows, not a switch thrown at a phase boundary.
 **Hand-built (Phase 1 kernel):** re-entrant `loop`; **DeepSeek** streaming client; `StreamEvent`
 contract + `stream.ts` (SSE + interceptor mechanism + the token-tap interceptor); tools
 `read`/`write`/`edit` (hashline)/`bash`/`manual` (self-docs, [D13](#d13--self-documentation-a-manual-tool-over-docsmanual-the-operators-manual)) + seed
-`docs/manual/` pages for the kernel subsystems; dispatcher + **PLAN/YOLO modes**; `session` + JSONL
+`docs/manual/` pages for the kernel subsystems; dispatcher + **PLAN/EDIT modes**; `session` + JSONL
 persistence; a usable TUI; and the **guardrails — `git init`, a `bun test` + `bun run typecheck`
 gate, and safe hot-reload (roll back to the old module on a failed import).**
 **Kernel simplification:** start the kernel with DeepSeek `thinking:{type:"disabled"}` — V4 defaults
@@ -268,7 +268,7 @@ self-hackability prime directive ([D7](#d7--self-hacking-runtime-hot-swap-of-sea
   manual page is the editable part.)
 - **Self-maintaining (anti-drift).** Pages are plain markdown edited with the normal hashline `edit`
   tool. The rule ([AGENT_RULES §2](AGENT_RULES.md)): **a change to a subsystem updates its
-  `docs/manual/` page in the same commit.** Reading is PLAN-safe; editing a page is a mutation (YOLO),
+  `docs/manual/` page in the same commit.** Reading is PLAN-safe; editing a page is a mutation (EDIT),
   consistent with everything else.
 **Why.** For nerve to self-host ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts))
 the agent (often a *weaker* model) must be able to look up "how does X work / how do I change it"
@@ -289,7 +289,7 @@ popup rendering + key handling live in `app.ts`.
   drill in by accepting). On submit the `@path` stays as **plain text** — the model `read`s it when
   it needs the content. No inline expansion (leanest; the `read` tool already exists).
 - **`!command` — direct shell, full authority, private.** Runs with **full authority, bypassing the
-  PLAN/YOLO gate** (that gate governs the *model*; the human is trusted), shows the output, and does
+  PLAN/EDIT gate** (that gate governs the *model*; the human is trusted), shows the output, and does
   **not** add it to the conversation (a side-glance that doesn't spend context). No suggestions (freeform).
 - **`/command` — commands + skills.** Autosuggests built-ins (`help`, `model`, `mode`, `clear`,
   `drop`, `resume`, `quit`) **+** discovered skills (name/description from `~/.claude` + `./.claude`
@@ -308,7 +308,7 @@ suggestions: Phase 2. Interactive rendering needs a real-terminal verification p
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app.
-- **Mode switch:** `Shift+Tab` cycles PLAN ↔ YOLO (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)).
+- **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)).
 - **Hot reload:** `/reload` command + keybind (`Ctrl+R`) ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
   Must roll back to the old module on a failed import once nerve self-edits ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
 - **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).

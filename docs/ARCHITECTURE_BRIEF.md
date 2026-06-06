@@ -15,7 +15,7 @@ Decisions and their rationale live in [DECISIONS.md](DECISIONS.md); rules in [AG
           tool_call  │                                                        │ text / reasoning / done
                      ▼                                                        ▼
               ┌─────────────┐  result (→ session)                      ┌──────────┐
-              │  dispatcher │◀── mode gate (PLAN/YOLO, human-only) ────│   tui    │ OpenTUI render
+              │  dispatcher │◀── mode gate (PLAN/EDIT, human-only) ────│   tui    │ OpenTUI render
               │  → tools    │ ───────────────────────────────────────▶ └──────────┘ (status: mode+model)
               └─────────────┘                                                │
                      │ msg lines (resume) + delta lines (token-tap telemetry) ─▶ .nerve/sessions/<id>.jsonl
@@ -185,7 +185,7 @@ cannot escalate (see [DECISIONS.md D4](DECISIONS.md)). Enforcement lives in the 
   `wc`…) with **no shell metacharacters** (`>` `>>` `|` `;` `&&` `$(...)` `` ` `` `tee`). Mutations
   blocked. Need a read-only capability bash can't safely express? **Build a tool**, don't loosen
   the filter.
-- **YOLO:** everything auto-runs.
+- **EDIT:** everything auto-runs.
 
 The loop never blocks mid-turn for input; the TUI needs no confirm dialog.
 
@@ -266,7 +266,7 @@ On startup, `context.ts` is a **pure function of the filesystem** (so it hot-swa
 OpenTUI imperative core (`@opentui/core`): a scrolling transcript of `Box`/`Text`, a streaming
 `markdown`/`code`/`diff` region fed by `text` deltas as they arrive, a `reasoning` region rendered
 dimmed/foldable (fed by the reasoning-router), and an `input`/`textarea` prompt. A **status line**
-shows the active **mode** (PLAN/YOLO) and **model profile**. Keybinds: `Shift+Tab` (mode),
+shows the active **mode** (PLAN/EDIT) and **model profile**. Keybinds: `Shift+Tab` (mode),
 `Ctrl+R`/`/reload` (hot-swap), `ESC` (abort the current turn via the provider `AbortSignal`),
 `Ctrl+C` (exit). Render is a cheap function of `session` state called per applied event; OpenTUI
 diffs the frame, so naive repaint-per-delta is fine to start. Imperative by default; a React/Solid

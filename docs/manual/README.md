@@ -38,7 +38,7 @@ of the implementation.
 | `interceptors` | the v1 interceptors + ordering | `src/interceptors.ts` |
 | `hashline` | content-anchored edit format | `src/hashline.ts` |
 | `tools` | the tool registry + the rent heuristic | `src/tools/` |
-| `modes` | PLAN/YOLO dispatch + the human-only switch | `src/dispatch.ts` |
+| `modes` | PLAN/EDIT dispatch + the human-only switch | `src/dispatch.ts` |
 | `loop` | the re-entrant turn loop | `src/loop.ts` |
 | `session` | accumulator + typed-line JSONL persistence | `src/session.ts` |
 | `lsp` | language-server client + diagnostics | `src/lsp/` |
