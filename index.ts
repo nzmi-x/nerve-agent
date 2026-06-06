@@ -81,9 +81,27 @@ const thinking = entry.thinking ?? false; // D11 kernel default: thinking off
 out(`${DIM}nerve · ${entry.id} (${entry.provider}) · ${mode.toUpperCase()} · session ${session.id}${RESET}\n`);
 
 if (prompt) {
+  // one-shot
   session.addUser(prompt);
   await runTurn(session, entry.id, thinking, entry.temperature, provider);
+  await session.close();
+} else if (process.stdin.isTTY) {
+  // interactive: the OpenTUI front-end (loaded lazily so headless runs don't pull in the renderer)
+  const { runTui } = await import("./src/tui/app.ts");
+  await runTui({
+    provider,
+    providerName: entry.provider,
+    session,
+    model: entry.id,
+    mode,
+    cwd: process.cwd(),
+    system: systemPrompt(),
+    tools: toolSpecs(),
+    thinking,
+    temperature: entry.temperature,
+  });
 } else {
+  // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);
   for await (const line of console) {
     const text = line.trim();
@@ -95,5 +113,5 @@ if (prompt) {
     await runTurn(session, entry.id, thinking, entry.temperature, provider);
     out("> ");
   }
+  await session.close();
 }
-await session.close();

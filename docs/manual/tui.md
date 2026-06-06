@@ -1,29 +1,33 @@
 # tui
 
-**Status:** spec (code lands in Phase 1)
-**What:** the terminal UI — a streaming transcript, reasoning fold, prompt, and status line, built
-on OpenTUI (our only dependency).
-**Code:** `src/tui/app.ts`
+**Status:** built (Phase 1) — minimal. Markdown/diff rendering is a future refinement.
+**What:** the interactive terminal UI — a streaming transcript, a status line, and an input.
+**Code:** `src/tui/app.ts` (`runTui`), launched by `index.ts` when stdin is a TTY.
 
 **How it works:**
-- OpenTUI **imperative core** (`@opentui/core`): `createCliRenderer`, then `Box`/`Text` +
-  `markdown`/`code`/`diff`/`scrollbox`/`input` factory functions (first arg props, rest children).
-- A scrolling transcript; a streaming region fed by `text` deltas as they arrive; a dimmed/foldable
-  region fed by `reasoning` deltas (from the reasoning-router interceptor); an `input`/`textarea`.
-- A **status line** shows the active mode (PLAN/YOLO) and model profile.
-- Render is a cheap function of `session` state, called per applied event; OpenTUI diffs the frame.
-- Keybinds: `Shift+Tab` (mode), `Ctrl+R`/`/reload` (hot-swap), `ESC` (abort turn), `Ctrl+C` (exit).
+- OpenTUI **imperative core** (`@opentui/core`): a root column `BoxRenderable` holding a
+  `ScrollBoxRenderable` transcript (`stickyScroll: bottom` — auto-pins to newest), a status
+  `TextRenderable`, and an `InputRenderable`.
+- Each transcript line is a `TextRenderable` appended to the scrollbox. A turn's **streaming answer**
+  lands in one live `TextRenderable` whose `.content` grows per `text` delta (via `loop`'s `onEvent`);
+  **reasoning** renders dim/italic (via the `reasoningRouter` interceptor); **tool results** dim.
+- Interceptors wired: `secretRedaction → reasoningRouter → tokenTap` (same order as the engine, D9).
+- Keys (`renderer.keyInput`): **Enter** submit, **Shift+Tab** toggle PLAN/YOLO (updates the status
+  line), **ESC** abort the in-flight turn (`turnAbort.abort()`), **Ctrl+C** clean shutdown (flush the
+  session, `renderer.destroy()`, exit). `exitOnCtrlC:false` so shutdown flushes first.
 
 **How to change it:**
-- Edit `src/tui/app.ts`. Stay on the **imperative core** by default; only reach for a React/Solid
-  binding if a screen genuinely needs reactive state — and justify it.
-- **For the OpenTUI API, call `manual("opentui")`** — it lazy-loads the vendored skill's `SKILL.md`
-  routing table + `docs/**/*.mdx` (it is *not* always in context). Drill into sub-pages, e.g.
-  `manual("opentui/core-concepts/layout")`, `manual("opentui/components/scrollbox")`.
+- **For the OpenTUI API, call `manual("opentui")`** — it lazy-loads the vendored skill's routing
+  table + `docs/**/*.mdx` (e.g. `manual("opentui/components/scrollbox")`). It is *not* always in context.
+- Keep the loop pure — the TUI only observes via `onEvent`/`onToolResult` and owns rendering.
+- Rich rendering (markdown/code/diff) → swap the answer `TextRenderable` for OpenTUI's `markdown`/
+  `code`/`diff` components; mind streaming (`ScrollbackSurface` for token-by-token highlight).
 
 **Gotchas:**
-- `--watch` (full restart) is the dev loop for the TUI, not `--hot` — a stateful renderer doesn't
-  survive in-place module swaps cleanly.
-- Naive repaint-per-delta is fine to start (OpenTUI diffs); optimize only if it shows up.
+- Interactive rendering can't be unit-tested headlessly — verify by running `bun index.ts` /
+  `bun run dev` in a real terminal. `--watch` (full restart) is the dev loop, not `--hot`.
+- Input keystrokes and the global `keyInput` handler both fire; the handler owns ESC/Shift+Tab/Ctrl+C.
+- ESC latency differs by terminal (Kitty keyboard protocol) — crisp in Ghostty, timing-based in the
+  VS Code terminal. Both work.
 
-**See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · OpenTUI skill: `.claude/skills/opentui/SKILL.md`
+**See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [loop](loop.md) · OpenTUI: `manual("opentui")`
