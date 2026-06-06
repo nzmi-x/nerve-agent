@@ -14,6 +14,7 @@ import { glob } from "./glob.ts";
 import { manual } from "./manual.ts";
 import { askUser } from "./ask.ts";
 import { lsp } from "./lsp.ts";
+import { notebook } from "./notebook.ts";
 
 // Each tool's module + named export — the single list `reloadTools` re-imports cache-busted (D7).
 // Add a tool = add its static import above (initial set) AND an entry here (so it hot-reloads).
@@ -28,10 +29,11 @@ const TOOL_MODULES: { path: string; name: string }[] = [
   { path: "./manual.ts", name: "manual" },
   { path: "./ask.ts", name: "askUser" },
   { path: "./lsp.ts", name: "lsp" },
+  { path: "./notebook.ts", name: "notebook" },
 ];
 
 /** The active tool set. `let`, not `const`, so `reloadTools` can swap it. */
-export let tools: Tool[] = [read, write, edit, bash, ls, grep, glob, manual, askUser, lsp];
+export let tools: Tool[] = [read, write, edit, bash, ls, grep, glob, manual, askUser, lsp, notebook];
 
 export function toolByName(name: string): Tool | undefined {
   return tools.find((t) => t.name === name);

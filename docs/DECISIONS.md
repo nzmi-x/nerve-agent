@@ -525,6 +525,36 @@ A separate "output styles" subsystem (claude-code has one) — overkill for one 
 **Note.** It reads oddly at a glance (terse caveman prose) — **intentional, not a bug**; don't "fix"
 it. The system prompt is agent-editable/hot-swappable, so the style can be tuned by editing the file.
 
+## D23 — Notebooks: marimo (pure-`.py`, reactive), no server — not Jupyter `.ipynb`/jupyterlite
+**Decision.** nerve's notebook format is **marimo**, whose notebooks are **pure `.py`** (reactive — a
+cell DAG, no hidden kernel state). Consequences:
+- **Read/edit/append cells = the existing file tools.** It's `.py`, so `read`/`edit` (hashline) work
+  unchanged and **pyrefly + ruff diagnostics fire on every cell edit for free** ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)). No new editing machinery.
+- **Run = the `notebook` tool** (`src/tools/notebook.ts`, `readonly:false` → EDIT-only): runs the
+  notebook **headlessly** via `marimo export ipynb … --include-outputs` and parses the embedded
+  per-cell outputs/errors into a terse report. No server.
+- **uv provisions marimo** (`uv run --with marimo --with nbformat …`); the notebook's own imports come
+  from the **project's uv env**. Missing `uv` → an install hint (same require-not-ship pattern as LSP).
+- **Persistence without a server:** `mo.persistent_cache` stores results on disk (`__marimo__/cache/`),
+  reused across runs — covers the "don't recompute the expensive cell" need.
+**Why.** For a **terminal-only, solo, AI-agent** workflow, marimo's `.py` format means nerve's best
+tools (hashline edit + pyrefly/ruff LSP) apply with **zero new code**, and reactivity **eliminates the
+hidden-kernel-state bug class** — the failure mode an agent is *worst* at (it can't see kernel state).
+It's ~10× leaner than an `.ipynb`+kernel subsystem and fits nerve's ethos. The user was willing to
+switch formats, so this beats preserving `.ipynb`.
+**Rejected.**
+- **jupyterlite** — browser/WASM (Pyodide) only; no headless terminal execution. Unusable by a terminal agent.
+- **`.ipynb` + persistent `ipykernel`** (a Python kernel bridge with LSP-style lifecycle) — true Jupyter
+  semantics + in-memory persistent state, but a whole new subsystem (kernel bridge + JSON cell-edit tool
+  + notebook-aware LSP) and the hidden-state bug surface. In-memory persistence only wins for
+  **non-serializable** live handles (DB/socket/GPU) or sub-ms iteration — niche for an agent; disk
+  `mo.persistent_cache` covers the common case.
+- **A marimo/jupyter server** tied to the harness lifecycle (the user offered) — unnecessary: marimo runs
+  headless as a script and persists to disk. Revisit only if non-serializable live state becomes central.
+- **Shipping** marimo — uv provisions it on demand.
+**Phase.** Built now (Phase 1.5), live-verified (per-cell stdout + error capture). Rust/Zig-style
+expansion N/A; an `ipykernel` runner can be added *alongside* later if persistent in-memory state is ever needed.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
