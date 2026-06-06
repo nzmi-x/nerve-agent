@@ -35,12 +35,21 @@ export const LANGPACKS: LangPack[] = [
 
 const SKILLS_DIR = resolve(import.meta.dir, "../skills");
 const HOOK_TIMEOUT_MS = 120_000;
-/** Max times nerve auto-continues to fix post-edit checker errors before giving up (D24). */
-export const MAX_AUTOFIX = 2;
 
-/** The follow-up prompt fed back to the agent when post-edit checks fail, to drive the auto-fix loop. */
-export function autofixPrompt(summaries: string[]): string {
-  return `The automatic post-edit checks (pyrefly/ruff) found issues in the files you just edited. Fix them with minimal changes — don't suppress with ignores unless truly necessary:\n\n${summaries.join("\n\n")}`;
+/**
+ * Fed back to the agent when post-edit checks fail (D24). The agent **triages** — there's no hardcoded
+ * retry cap; its own decision ends the loop: fixing edits the files (checks re-run), while deferring
+ * means it doesn't edit, so the loop stops naturally (no edits → no hooks → no continuation).
+ */
+export function triagePrompt(summaries: string[]): string {
+  return [
+    "The automatic post-edit checks (pyrefly/ruff) flagged the following in files you just edited. Triage each:",
+    "- critical / must-fix, or quick / easy → fix it now (edit the file).",
+    "- not critical / can wait → leave it: briefly note which and why, and do NOT edit it.",
+    "Fixing re-runs the checks. If you're leaving the rest, just say so with no further edits and we stop.",
+    "",
+    summaries.join("\n\n"),
+  ].join("\n");
 }
 
 const extOf = (path: string): string => {

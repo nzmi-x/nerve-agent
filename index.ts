@@ -7,7 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
-import { activePacks, langForFile, langSkills, runHooks, autofixPrompt, MAX_AUTOFIX } from "./src/langpack.ts";
+import { activePacks, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
@@ -71,7 +71,7 @@ const langTouched = new Set<string>(); // D24: sticky across turns (skill inject
 let langSkillText = "";
 let langSkillKey = "";
 
-async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[], autoDepth = 0): Promise<void> {
+async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[], prevIssues?: string): Promise<void> {
   const ac = new AbortController();
   const onSigint = (): void => ac.abort();
   process.once("SIGINT", onSigint);
@@ -118,11 +118,15 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     }
     issues ||= res.issues;
   }
-  if (issues && autoDepth < MAX_AUTOFIX) {
-    session.addUser(autofixPrompt(summaries));
-    out(`${DIM}↪ auto-fixing post-edit issues…${RESET}\n`);
-    await runTurn(session, entryId, thinking, temperature, provider, fallbacks, autoDepth + 1);
+  if (!issues) return;
+  const issueSummary = summaries.join("\n\n");
+  if (issueSummary === prevIssues) {
+    out(`${DIM}⚠ post-edit issues unchanged after a fix attempt — leaving them${RESET}\n`);
+    return;
   }
+  session.addUser(triagePrompt(summaries)); // agent triages: fix critical/quick, defer non-critical
+  out(`${DIM}↪ post-edit checks failed — agent triaging…${RESET}\n`);
+  await runTurn(session, entryId, thinking, temperature, provider, fallbacks, issueSummary);
 }
 
 // --- boot -------------------------------------------------------------------

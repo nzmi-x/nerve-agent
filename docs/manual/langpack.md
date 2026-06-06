@@ -19,9 +19,11 @@ native, [D24](../DECISIONS.md).
   the **fixers** (edit in place) then the **checkers** (report) on just those files, and prints a
   `⚙ post-edit hooks (<lang>)` summary. Python: `pyrefly infer` → `ruff check --select I --fix` →
   `ruff check --fix` → `ruff format`, then `pyrefly check` + `ruff check`.
-- **Auto-fix loop** (D24): if the checkers still report issues, nerve feeds the summary back to the
-  agent (`autofixPrompt`) for another turn so it fixes them — **bounded by `MAX_AUTOFIX` (2)**; a clean
-  check stops it. Wired in `runAgentTurn` (TUI) / `runTurn` (headless), which recurse with `autoDepth+1`.
+- **Triage loop** (D24): if the checkers still report issues, nerve hands the summary back
+  (`triagePrompt`) and the **agent triages** — fix critical/quick now, defer non-critical. **No retry
+  cap**: deferring means the agent doesn't edit → no hooks → the loop stops; the only safety is a
+  *no-progress* stop (issue summary unchanged after an edit). Wired in `runAgentTurn` (TUI) /
+  `runTurn` (headless), which recurse with the new issue summary as `prevIssues`.
 
 **How to change it:**
 - **Add a language** = a `LANGPACK` entry (`extensions`, `skillFiles` under `skills/`, `fixers`,
@@ -37,8 +39,8 @@ native, [D24](../DECISIONS.md).
 - The hooks are only as strict as the **user's pyrefly/ruff config** — the default pyrefly "basic"
   preset (no `pyrefly.toml`) catches undefined names etc., not every type mismatch. Stricter project
   config → the auto-fix loop fires on more.
-- The auto-fix loop is **bounded** (`MAX_AUTOFIX`) so the agent can't spin on un-fixable errors; ESC
-  during an auto-fix turn stops it (the abort check skips hooks/continuation).
+- The triage loop has **no count cap** — it ends when the agent stops editing (deferring) or the issue
+  summary stops changing (no progress); ESC during a triage turn stops it (the abort check skips hooks).
 - Missing `pyrefly`/`ruff` → that step is skipped with a note (`uv tool install pyrefly`/`ruff`).
 
 **See:** [DECISIONS D24](../DECISIONS.md) · [lsp](lsp.md) · [tools](tools.md) · [marimo](marimo.md)

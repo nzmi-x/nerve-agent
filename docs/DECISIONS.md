@@ -569,11 +569,13 @@ LSP servers ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backe
   files edited that turn**: `pyrefly infer` → `ruff check --select I --fix` → `ruff check --fix` →
   `ruff format` (the **fixers**, edit in place), then `pyrefly check` + `ruff check` (the **checkers**,
   reported as a `⚙ post-edit` summary). The agent doesn't call these by hand.
-- **Auto-fix loop:** if the checkers still report issues, nerve feeds the summary back to the agent
-  (`autofixPrompt`) as a follow-up turn so it fixes them — **bounded by `MAX_AUTOFIX` (2)**, and only
-  on real (non-auto-fixable) findings. A clean check stops the loop. (Note: only as strict as the
-  user's pyrefly/ruff config — the default pyrefly "basic" preset catches undefined names etc., not
-  every type mismatch.)
+- **Triage loop (the agent decides, no hardcoded cap):** if the checkers still report issues, nerve
+  hands the summary back (`triagePrompt`) and the **agent triages** — fix *critical/quick* now, *defer
+  non-critical*. There's **no retry counter**: the agent's own choice ends the loop — fixing edits the
+  files (checks re-run), deferring means it doesn't edit, so the loop stops naturally (no edits → no
+  hooks → no continuation). The one safety: if the agent edits but the **issue summary is unchanged**
+  (stuck), nerve stops. (Only as strict as the user's pyrefly/ruff config — the default pyrefly "basic"
+  preset catches undefined names etc., not every type mismatch.)
 - Plumbed by two `ToolContext` sets the tools record into: **`touched`** (sticky → skill injection) and
   **`edited`** (per-turn → which files the hooks run on). Missing `pyrefly`/`ruff` → skipped with a note.
 **Why.** The user wants the pyrefly/ruff *guidance* loaded only when working in Python, and the
@@ -584,8 +586,9 @@ auto-format is fine here but *not* mid-edit (the reason ruff-format isn't an LSP
 **Rejected.** Claude-style **`settings.json` external hooks** ([D20](#d20--surveyed-and-deliberately-deferred-or-rejected)) — nerve's are native/built-in, not a
 user-config hook framework (this is the concrete need). Shipping the skills in `skillRoots` — they'd
 show in the `/` popup always (the user wants them hidden until the language is active). Running fixers
-**mid-edit** (stales hashline anchors). **Whole-project** format/lint (only the edited files). An
-*unbounded* auto-fix loop — capped at `MAX_AUTOFIX` so the agent can't spin on errors it can't fix.
+**mid-edit** (stales hashline anchors). **Whole-project** format/lint (only the edited files). A
+**hardcoded retry cap** (`MAX_AUTOFIX`) — the user hates magic numbers; the agent **triages** instead,
+and a *no-progress* check (unchanged issues after an edit) is the only stop, not an arbitrary count.
 **Phase.** Built now (Phase 1.5), live-verified (messy `.py` → annotated/sorted/formatted, checkers
 clean; an undefined-name error → `issues:true` → auto-fix loop). Add a language = a `LANGPACK` entry + its `skills/` files.
 

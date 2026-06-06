@@ -31,7 +31,7 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
-import { activePacks, langForFile, langSkills, runHooks, autofixPrompt, MAX_AUTOFIX } from "../langpack.ts";
+import { activePacks, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
@@ -511,14 +511,16 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer();
     addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
-    await runAgentTurn(0);
+    await runAgentTurn();
     busy = false;
     setStatus();
     input.focus();
   }
 
-  // One agent turn: stream → tools → post-edit hooks → (D24) auto-fix loop if the checks failed.
-  async function runAgentTurn(autoDepth: number): Promise<void> {
+  // One agent turn: stream → tools → post-edit hooks → (D24) hand failing checks back so the agent
+  // triages + fixes. `prevIssues` is the prior turn's issue summary — if unchanged after an edit, the
+  // agent's stuck, so we stop (no hardcoded retry cap; the agent's choice to stop editing ends it).
+  async function runAgentTurn(prevIssues?: string): Promise<void> {
     let reasoningLine: TextRenderable | null = null;
     let answer = addMarkdown();
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
@@ -591,12 +593,16 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       if (res.summary) summaries.push(res.summary);
       issues ||= res.issues;
     }
-    // Auto-fix loop: feed the failing checks back so the agent fixes them, bounded by MAX_AUTOFIX.
-    if (issues && autoDepth < MAX_AUTOFIX) {
-      session.addUser(autofixPrompt(summaries));
-      addText(t`${fg(YELLOW)("↪")} ${fg(MUTE)("auto-fixing post-edit issues…")}`);
-      await runAgentTurn(autoDepth + 1);
+    if (!issues) return;
+    const issueSummary = summaries.join("\n\n");
+    if (issueSummary === prevIssues) {
+      addText(t`${fg(YELLOW)("⚠")} ${fg(MUTE)("post-edit issues unchanged after a fix attempt — leaving them for you")}`);
+      return;
     }
+    // Hand the failing checks back; the agent triages (fix critical/quick, defer non-critical).
+    session.addUser(triagePrompt(summaries));
+    addText(t`${fg(YELLOW)("↪")} ${fg(MUTE)("post-edit checks failed — agent triaging…")}`);
+    await runAgentTurn(issueSummary);
   }
 
   let shuttingDown = false;

@@ -1,11 +1,12 @@
 import { test, expect } from "bun:test";
-import { langForFile, activePacks, langSkills, checkSummary, autofixPrompt, LANGPACKS } from "../src/langpack.ts";
+import { langForFile, activePacks, langSkills, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
 
-test("autofixPrompt: instructs a minimal fix and includes the check summaries", () => {
-  const p = autofixPrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
-  expect(p).toContain("post-edit checks");
+test("triagePrompt: presents the triage buckets + includes the check summaries", () => {
+  const p = triagePrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
+  expect(p).toContain("Triage");
+  expect(p.toLowerCase()).toContain("critical");
+  expect(p.toLowerCase()).toContain("not critical");
   expect(p).toContain("bad type");
-  expect(p.toLowerCase()).toContain("fix");
 });
 
 test("checkSummary: a clean report ends with ': clean' (drives the no-auto-continue path)", () => {
