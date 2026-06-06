@@ -1,6 +1,6 @@
 # tools
 
-**Status:** built (Phase 1) — read, write, edit, bash, ls, grep, glob, manual · `lsp` joins in Phase 2
+**Status:** built (Phase 1) — read, write, edit, bash, ls, grep, glob, manual, ask_user · `lsp` joins in Phase 2
 **What:** the local tool set the model calls. Each is a plain object run as a direct Bun call —
 no daemon, no RPC. The registry exposes them to the providers and to the dispatcher.
 **Code:** `src/tools/types.ts` (the `Tool` contract) · `src/tools/registry.ts` · `src/tools/*.ts`
@@ -24,6 +24,9 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `manual` (self-docs, [D13](../DECISIONS.md)) serves `docs/manual/*.md` + `docs/*.md` + the `opentui`
   skill, resolved against nerve's **install dir** (`import.meta.dir`), not `cwd`. OpenTUI is lazy:
   `manual("opentui"[/<slug>])`. Topic index is the filesystem; manual pages win same-name collisions.
+- `ask_user` ([D14](../DECISIONS.md)) asks the human a question via `ctx.ask` (the surface supplies it:
+  the TUI renders an interactive picker, headless auto-recommends). `readonly` → usable in PLAN. The
+  contract: 2–4 options, mark one `recommended` unless they're equivalent.
 
 **How to change it:**
 - **Add a tool** = a new `src/tools/<name>.ts` exporting a `Tool`, then add it to `tools` in

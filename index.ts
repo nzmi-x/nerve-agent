@@ -10,6 +10,7 @@ import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.t
 import { toolSpecs } from "./src/tools/registry.ts";
 import type { Mode } from "./src/dispatch.ts";
 import type { Provider } from "./src/providers/types.ts";
+import type { AskRequest } from "./src/tools/types.ts";
 
 const argv = process.argv.slice(2);
 const arg = (name: string): string | undefined => {
@@ -28,6 +29,13 @@ const out = (s: string): void => void process.stdout.write(s);
 function systemPrompt(): string {
   const p = resolve(import.meta.dir, "prompts/system.md");
   return existsSync(p) ? readFileSync(p, "utf8") : "You are nerve, a terminal coding agent.";
+}
+
+// Non-interactive ask_user: auto-pick the recommended option (the TUI provides the real picker).
+function headlessAsk(req: AskRequest): Promise<string> {
+  const rec = req.options.find((o) => o.recommended) ?? req.options[0]!;
+  out(`\n${DIM}? ${req.question} → auto: ${rec.label}${RESET}\n`);
+  return Promise.resolve(rec.label);
 }
 
 function lastSessionId(): string {
@@ -50,7 +58,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     session,
     model: entryId,
     mode,
-    ctx: { cwd: process.cwd() },
+    ctx: { cwd: process.cwd(), ask: headlessAsk },
     interceptors: [secretRedaction(), reasoningRouter((d) => out(DIM + d + RESET)), tokenTap(session)],
     signal: ac.signal,
     system: systemPrompt(),

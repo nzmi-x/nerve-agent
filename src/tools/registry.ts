@@ -10,9 +10,10 @@ import { ls } from "./ls.ts";
 import { grep } from "./grep.ts";
 import { glob } from "./glob.ts";
 import { manual } from "./manual.ts";
+import { askUser } from "./ask.ts";
 
 /** The Phase-1 tool set. `lsp` joins in Phase 2. */
-export const tools: readonly Tool[] = [read, write, edit, bash, ls, grep, glob, manual];
+export const tools: readonly Tool[] = [read, write, edit, bash, ls, grep, glob, manual, askUser];
 
 export function toolByName(name: string): Tool | undefined {
   return tools.find((t) => t.name === name);
