@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { formatResult, formatDiagnostic, loc, severityName, type LspOp } from "../src/lsp/format.ts";
-import { loadServers, findRoot } from "../src/lsp/manager.ts";
+import { loadServers, findRoot, installHint } from "../src/lsp/manager.ts";
 
 // --- format.ts (pure result mappers) ----------------------------------------
 
@@ -53,6 +53,17 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+test("installHint: chains the package-manager install when it's also missing", () => {
+  const py = { command: "pyrefly", install: "uv tool install pyrefly" };
+  expect(installHint(py, () => true)).toBe("`uv tool install pyrefly`"); // uv present → just the install
+  const missing = installHint(py, (c) => c !== "uv"); // uv missing too
+  expect(missing).toContain("install uv first");
+  expect(missing).toContain("astral.sh/uv/install.sh");
+  expect(missing).toContain("uv tool install pyrefly");
+  // a server with no known package-manager prefix is unchanged
+  expect(installHint({ command: "gopls", install: "go install golang.org/x/tools/gopls@latest" }, () => false)).toBe("`go install golang.org/x/tools/gopls@latest`");
 });
 
 test("findRoot: walks up to a marker, else falls back to the start dir", async () => {

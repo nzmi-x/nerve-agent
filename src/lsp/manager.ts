@@ -29,6 +29,22 @@ const LANGUAGE_ID: Record<string, string> = {
 const SETTLE_MS = 800; // servers publish diagnostics async after didChange (pyrefly lints then type-checks)
 const MAX_DIAGS = 30;
 
+// How to install the package managers our `install` hints rely on — surfaced when the manager itself
+// is missing (a `uv tool install pyrefly` hint is useless without uv).
+const TOOLCHAIN: Record<string, string> = {
+  uv: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+  bun: "curl -fsSL https://bun.sh/install | bash",
+};
+
+/** The install instruction for a missing server — chains the package-manager install first if it too
+ *  is absent (e.g. "install uv first (…), then `uv tool install pyrefly`"). `has` is injectable for tests. */
+export function installHint(server: { command: string; install?: string }, has: (cmd: string) => boolean = (c) => !!Bun.which(c)): string {
+  const cmd = server.install ?? server.command;
+  const tool = cmd.split(/\s+/)[0] ?? "";
+  if (TOOLCHAIN[tool] && !has(tool)) return `install ${tool} first (\`${TOOLCHAIN[tool]}\`), then \`${cmd}\``;
+  return `\`${cmd}\``;
+}
+
 export function loadServers(path?: string): ServerCfg[] {
   const p = path ?? (existsSync(globalLspPath()) ? globalLspPath() : BUNDLED);
   try {
@@ -92,13 +108,13 @@ export class Lsp {
     return p;
   }
 
-  /** One-time install hints for a path's missing servers. */
+  /** One-time install hints for a path's missing servers (chaining the package manager if it's missing too). */
   private hints(path: string): string[] {
     const out: string[] = [];
     for (const s of this.serversFor(path)) {
       if (!Bun.which(s.command) && !this.reported.has(s.id)) {
         this.reported.add(s.id);
-        out.push(`${s.id} not installed — \`${s.install ?? s.command}\` to enable ${s.id} diagnostics`);
+        out.push(`${s.id} not installed — ${installHint(s)} to enable ${s.id}`);
       }
     }
     return out;

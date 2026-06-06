@@ -32,7 +32,9 @@ missing-server hint). vtsls path verified for the missing case — `bun install 
 - Tune diagnostics latency → `SETTLE_MS` in `manager.ts`. Map a new result shape → `format.ts` (tested).
 
 **Gotchas:**
-- nerve does **not** install servers (D10) — missing ones degrade to an install hint.
+- nerve does **not** install servers (D10) — missing ones degrade to an install hint. If the hint's
+  **package manager** is itself missing (e.g. no `uv` for `uv tool install pyrefly`), `installHint`
+  chains it: "install uv first (…), then `uv tool install pyrefly`". Add managers to `TOOLCHAIN` in `manager.ts`.
 - **Ruff is diagnostics-only and never auto-formats** — auto-format on edit would stale hashline anchors
   ([D3](../DECISIONS.md)). `ruff format` stays an explicit `bash` action.
 - First edit on a cold server (esp. vtsls' project load) may return partial diagnostics; later edits are complete.
