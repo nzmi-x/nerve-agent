@@ -1,33 +1,34 @@
 # tui
 
-**Status:** built (Phase 1) — minimal. Markdown/diff rendering is a future refinement.
-**What:** the interactive terminal UI — a streaming transcript, a status line, and an input.
-**Code:** `src/tui/app.ts` (`runTui`), launched by `index.ts` when stdin is a TTY.
+**Status:** built (Phase 1). Base layout verified in a real terminal; affordances/status need a verify pass.
+**What:** the interactive terminal UI — transcript, autosuggest row, status line, and an input with
+`@`/`!`/`/` affordances + an interactive `ask_user` picker.
+**Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)).
 
 **How it works:**
-- OpenTUI **imperative core** (`@opentui/core`): a root column `BoxRenderable` holding a
-  `ScrollBoxRenderable` transcript (`stickyScroll: bottom` — auto-pins to newest), a status
-  `TextRenderable`, and an `InputRenderable`.
-- Each transcript line is a `TextRenderable` appended to the scrollbox. A turn's **streaming answer**
-  lands in one live `TextRenderable` whose `.content` grows per `text` delta (via `loop`'s `onEvent`);
-  **reasoning** renders dim/italic (via the `reasoningRouter` interceptor); **tool results** dim.
-- Interceptors wired: `secretRedaction → reasoningRouter → tokenTap` (same order as the engine, D9).
-- Keys (`renderer.keyInput`): **Enter** submit, **Shift+Tab** toggle PLAN/YOLO (updates the status
-  line), **ESC** abort the in-flight turn (`turnAbort.abort()`), **Ctrl+C** clean shutdown (flush the
-  session, `renderer.destroy()`, exit). `exitOnCtrlC:false` so shutdown flushes first.
+- OpenTUI imperative core: root column = `ScrollBox` transcript (`stickyScroll: bottom`) · a `popup`
+  `TextRenderable` (autosuggest **or** the ask picker) · a status `TextRenderable` · an `Input`.
+- **Streaming** text grows a live `TextRenderable`; reasoning dim/italic; tool results dim. Lines are
+  appended (`transcript.add`) and removed by id (`transcript.remove(id)`) for `/clear` & `/drop`.
+- **Status line:** `model · mode · cost · context% · balance`, fed by `UsageMeter` (on `usage` events)
+  + `fetchBalance` (startup / `/model` / `/balance`). See [usage](usage.md), [balance](balance.md).
+- **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
+  shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
+  popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
+- **Commands:** `/help /model [id] /mode plan|yolo /clear /drop /balance /resume /quit` + skill listing.
+- **`ask_user`:** the loop's `ctx.ask` opens an interactive picker (↑/↓ + Enter) in the popup and
+  blocks the turn until you choose; the recommended option is preselected.
+- **Keys:** Enter send · **Tab accept suggestion** · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit.
 
 **How to change it:**
-- **For the OpenTUI API, call `manual("opentui")`** — it lazy-loads the vendored skill's routing
-  table + `docs/**/*.mdx` (e.g. `manual("opentui/components/scrollbox")`). It is *not* always in context.
-- Keep the loop pure — the TUI only observes via `onEvent`/`onToolResult` and owns rendering.
-- Rich rendering (markdown/code/diff) → swap the answer `TextRenderable` for OpenTUI's `markdown`/
-  `code`/`diff` components; mind streaming (`ScrollbackSurface` for token-by-token highlight).
+- The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;
+  `app.ts` only renders + routes keys. For the OpenTUI API, `manual("opentui")`.
+- New `/command` → add to `BUILTIN_COMMANDS` (affordances) + a `case` in `runCommand`.
 
 **Gotchas:**
-- Interactive rendering can't be unit-tested headlessly — verify by running `bun index.ts` /
-  `bun run dev` in a real terminal. `--watch` (full restart) is the dev loop, not `--hot`.
-- Input keystrokes and the global `keyInput` handler both fire; the handler owns ESC/Shift+Tab/Ctrl+C.
-- ESC latency differs by terminal (Kitty keyboard protocol) — crisp in Ghostty, timing-based in the
-  VS Code terminal. Both work.
+- Interactive rendering isn't unit-testable — verify in a real terminal (`bun index.ts`). Watch:
+  Tab-accept (if the Input eats Tab, switch to a consumed input handler), the popup row when empty
+  (should be 0 height), and the ask picker blocking.
+- ESC latency differs by terminal (Kitty protocol) — crisp in Ghostty, timing-based in VS Code.
 
-**See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [loop](loop.md) · OpenTUI: `manual("opentui")`
+**See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [affordances/D14](../DECISIONS.md) · [usage](usage.md) · [balance](balance.md)

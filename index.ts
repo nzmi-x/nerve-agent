@@ -3,6 +3,7 @@
 // one-shot prompts (`-p "…"`) or a simple stdin REPL, streaming to stdout. See docs/manual/loop.md.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { loadModels, providerFor, selectModel } from "./src/config.ts";
 import { Session } from "./src/session.ts";
 import { loop } from "./src/loop.ts";
@@ -75,7 +76,8 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
 }
 
 // --- boot -------------------------------------------------------------------
-const entry = selectModel(loadModels(), arg("--model"));
+const models = loadModels();
+const entry = selectModel(models, arg("--model"));
 let provider: Provider;
 try {
   provider = providerFor(entry);
@@ -96,18 +98,9 @@ if (prompt) {
 } else if (process.stdin.isTTY) {
   // interactive: the OpenTUI front-end (loaded lazily so headless runs don't pull in the renderer)
   const { runTui } = await import("./src/tui/app.ts");
-  await runTui({
-    provider,
-    providerName: entry.provider,
-    session,
-    model: entry.id,
-    mode,
-    cwd: process.cwd(),
-    system: systemPrompt(),
-    tools: toolSpecs(),
-    thinking,
-    temperature: entry.temperature,
-  });
+  const { discoverSkills } = await import("./src/tui/affordances.ts");
+  const skills = await discoverSkills([join(homedir(), ".claude/skills"), join(process.cwd(), ".claude/skills")]);
+  await runTui({ models, entry, provider, session, mode, cwd: process.cwd(), system: systemPrompt(), tools: toolSpecs(), skills });
 } else {
   // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);

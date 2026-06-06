@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deepseek } from "./providers/deepseek.ts";
 import type { Provider } from "./providers/types.ts";
+import type { Pricing } from "./usage.ts";
 
 export interface ModelEntry {
   id: string;
@@ -12,6 +13,10 @@ export interface ModelEntry {
   default?: boolean;
   temperature?: number;
   thinking?: boolean;
+  /** Max context window in tokens — drives the context-used indicator. */
+  contextWindow?: number;
+  /** USD per 1M tokens — drives session cost tracking. */
+  pricing?: Pricing;
 }
 
 const DEFAULT_CATALOG = resolve(import.meta.dir, "../config/models.json");
