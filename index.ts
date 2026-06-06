@@ -7,6 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
+import { activePacks, langForFile, langSkills, runHooks } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
@@ -66,19 +67,31 @@ function headlessAsk(req: AskRequest): Promise<string> {
   return Promise.resolve(rec.label);
 }
 
+const langTouched = new Set<string>(); // D24: sticky across turns (skill injection)
+let langSkillText = "";
+let langSkillKey = "";
+
 async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[]): Promise<void> {
   const ac = new AbortController();
   const onSigint = (): void => ac.abort();
   process.once("SIGINT", onSigint);
+  const edited = new Set<string>();
+  const packs = activePacks(langTouched);
+  const key = packs.map((p) => p.id).join(",");
+  if (packs.length && key !== langSkillKey) {
+    langSkillText = await langSkills(packs);
+    langSkillKey = key;
+  }
+  const sys = packs.length && langSkillText ? `${systemPrompt()}\n\n${langSkillText}` : systemPrompt();
   await loop({
     provider,
     session,
     model: entryId,
     mode,
-    ctx: { cwd: process.cwd(), ask: headlessAsk, lsp },
+    ctx: { cwd: process.cwd(), ask: headlessAsk, lsp, touched: langTouched, edited },
     interceptors: [secretRedaction(), reasoningRouter((d) => out(DIM + d + RESET)), tokenTap(session)],
     signal: ac.signal,
-    system: systemPrompt(),
+    system: sys,
     tools: toolSpecs(),
     thinking,
     temperature,
@@ -92,6 +105,13 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
   });
   process.removeListener("SIGINT", onSigint);
   out("\n");
+  // D24 post-edit hooks: auto fix + check the Python files edited this turn (EDIT mode only).
+  if (mode === "edit" && edited.size) {
+    for (const pack of activePacks(edited)) {
+      const summary = await runHooks(pack, [...edited].filter((f) => langForFile(f) === pack), process.cwd());
+      if (summary) out(`${DIM}${summary}${RESET}\n`);
+    }
+  }
 }
 
 // --- boot -------------------------------------------------------------------

@@ -31,6 +31,7 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
+import { activePacks, langForFile, langSkills, runHooks } from "../langpack.ts";
 import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
@@ -122,6 +123,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // Hot-swappable leaf seams (D7): tool specs + interceptor factories. /reload re-imports them.
   let tools = opts.tools;
   let ic = interceptorsMod;
+  // Language packs (D24): sticky set of files touched this session + the cached skill text to inject.
+  const langTouched = new Set<string>();
+  let langSkillText = "";
+  let langSkillKey = "";
 
   let active = opts.entry;
   let provider = opts.provider;
@@ -508,6 +513,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     session.addUser(text);
     let reasoningLine: TextRenderable | null = null;
     let answer = addMarkdown();
+    // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
+    const packs = activePacks(langTouched);
+    const key = packs.map((p) => p.id).join(",");
+    if (packs.length && key !== langSkillKey) {
+      langSkillText = await langSkills(packs);
+      langSkillKey = key;
+    }
+    const sys = packs.length && langSkillText ? `${system}\n\n${langSkillText}` : system;
+    const edited = new Set<string>();
     turnAbort = new AbortController();
     try {
       await loop({
@@ -515,7 +529,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
@@ -525,7 +539,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           ic.tokenTap(session),
         ],
         signal: turnAbort.signal,
-        system,
+        system: sys,
         tools,
         thinking: active.thinking ?? false,
         temperature: active.temperature,
@@ -550,11 +564,21 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
     } finally {
       answer.streaming = false;
-      busy = false;
       turnAbort = null;
-      setStatus();
-      input.focus();
     }
+    // D24 post-edit hooks: auto-fix + check the files edited this turn (EDIT only). Files were just
+    // written, so this is the safe time to reformat (next turn re-reads / hashline re-anchors).
+    if (mode === "edit" && edited.size) {
+      for (const pack of activePacks(edited)) {
+        const files = [...edited].filter((f) => langForFile(f) === pack);
+        const note = addText(t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
+        note.content = (await runHooks(pack, files, cwd)) || note.content;
+        note.fg = MUTE;
+      }
+    }
+    busy = false;
+    setStatus();
+    input.focus();
   }
 
   let shuttingDown = false;

@@ -558,6 +558,33 @@ switch formats, so this beats preserving `.ipynb`.
 **Phase.** Built now (Phase 1.5), live-verified (per-cell stdout + error capture). Rust/Zig-style
 expansion N/A; an `ipykernel` runner can be added *alongside* later if persistent in-memory state is ever needed.
 
+## D24 — Language packs: conditional skills + native post-edit hooks
+**Decision.** A language can ship a **pack** (`src/langpack.ts`) of two things, both **built-in (native)**
+and activated when a file of that language is **touched** (read/write/edit) — the same trigger as the
+LSP servers ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)), but independent of them (works under `--no-lsp`). **Python ships first:**
+- **Skills** — `skills/pyrefly/SKILL.md` + `skills/ruff/SKILL.md` (how to use them). **Hidden** (not in
+  `skillRoots`, so not in the `/` popup); their bodies are **injected into the system prompt** only once
+  Python is in play (progressive disclosure). So the agent learns the Python toolchain exactly when relevant.
+- **Post-edit hooks** — after an **editing turn** (EDIT mode), nerve auto-runs, on **just the `.py`
+  files edited that turn**: `pyrefly infer` → `ruff check --select I --fix` → `ruff check --fix` →
+  `ruff format` (the **fixers**, edit in place), then `pyrefly check` + `ruff check` (the **checkers**,
+  reported as a `⚙ post-edit` summary). The agent doesn't call these by hand.
+- Plumbed by two `ToolContext` sets the tools record into: **`touched`** (sticky → skill injection) and
+  **`edited`** (per-turn → which files the hooks run on). Missing `pyrefly`/`ruff` → skipped with a note.
+**Why.** The user wants the pyrefly/ruff *guidance* loaded only when working in Python, and the
+formatters/fixers/checkers run **automatically** rather than relying on the agent to remember. **Turn
+boundary** is the safe time to reformat: anchors from this turn are spent, and the next turn re-reads
+(a stale anchor hard-rejects, [D3](#d3--edit-mechanism-hashline-only-content-anchored)) — which is why
+auto-format is fine here but *not* mid-edit (the reason ruff-format isn't an LSP-on-edit action, [D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)). Reuses the existing tools + the LSP-on-`.py` trigger; ~one module.
+**Rejected.** Claude-style **`settings.json` external hooks** ([D20](#d20--surveyed-and-deliberately-deferred-or-rejected)) — nerve's are native/built-in, not a
+user-config hook framework (this is the concrete need). Shipping the skills in `skillRoots` — they'd
+show in the `/` popup always (the user wants them hidden until the language is active). Running fixers
+**mid-edit** (stales hashline anchors). **Whole-project** format/lint (only the edited files). **Auto-
+continuing** the agent to fix remaining checker errors — *deferred*; v1 surfaces the `⚙ post-edit`
+report (the human acts), since the ask was to *run* the commands automatically, which it does.
+**Phase.** Built now (Phase 1.5), live-verified (messy `.py` → annotated/sorted/formatted, checkers
+clean). Add a language = a `LANGPACK` entry + its `skills/` files; an auto-continue-on-errors loop is a clean later add.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

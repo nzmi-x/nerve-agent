@@ -23,6 +23,10 @@ export interface ToolContext {
   ask?: (req: AskRequest) => Promise<string>;
   /** Language-server manager (D10) — `read`/`write`/`edit` append diagnostics, the `lsp` tool queries. */
   lsp?: import("../lsp/manager.ts").Lsp;
+  /** Absolute paths the agent has *touched* this session (read/write/edit) — drives language packs (D24). */
+  touched?: Set<string>;
+  /** Absolute paths *edited* this turn (write/edit) — the post-edit hooks run on these. */
+  edited?: Set<string>;
 }
 
 export interface Tool {

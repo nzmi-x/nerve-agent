@@ -17,6 +17,7 @@ export const read: Tool = {
   async run(args, ctx) {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
     const abs = resolve(ctx.cwd, args.path);
+    ctx.touched?.add(abs); // language-pack trigger (D24)
     const file = Bun.file(abs);
     if (!(await file.exists())) return `Error: no such file: ${args.path}`;
     const content = (await file.text()).replaceAll("\r\n", "\n");

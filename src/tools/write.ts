@@ -17,6 +17,8 @@ export const write: Tool = {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
     if (typeof args.content !== "string") return "Error: 'content' must be a string";
     const abs = resolve(ctx.cwd, args.path);
+    ctx.touched?.add(abs);
+    ctx.edited?.add(abs); // post-edit hooks run on this at turn end (D24)
     await Bun.write(abs, args.content); // creates parent dirs
     const n = args.content === "" ? 0 : args.content.replace(/\n$/, "").split("\n").length;
     const head = `Wrote ${args.path} (${n} line${n === 1 ? "" : "s"})`;

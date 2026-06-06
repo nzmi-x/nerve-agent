@@ -44,11 +44,14 @@ export const edit: Tool = {
     const result = applyEdits(content, args.edits as HashEdit[]);
     if (!result.ok) return `Edit rejected — ${result.error}\nFresh anchors:\n${result.anchors}`;
 
-    await Bun.write(resolve(ctx.cwd, args.path), result.content);
+    const abs = resolve(ctx.cwd, args.path);
+    await Bun.write(abs, result.content);
+    ctx.touched?.add(abs);
+    ctx.edited?.add(abs); // post-edit hooks run on this at turn end (D24)
     const n = result.content === "" ? 0 : result.content.replace(/\n$/, "").split("\n").length;
     const head = `Applied ${args.edits.length} edit(s) to ${args.path} (${n} lines)`;
     const body = n > REANCHOR_CAP ? head : `${head}\nUpdated anchors:\n${encode(result.content)}`;
     // D10: append language-server diagnostics so the agent sees breakage immediately.
-    return ctx.lsp ? body + (await ctx.lsp.diagnostics(resolve(ctx.cwd, args.path), result.content)) : body;
+    return ctx.lsp ? body + (await ctx.lsp.diagnostics(abs, result.content)) : body;
   },
 };
