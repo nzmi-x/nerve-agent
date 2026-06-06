@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deepseek } from "./providers/deepseek.ts";
+import { gemini } from "./providers/gemini.ts";
 import type { Provider } from "./providers/types.ts";
 import type { Candidate } from "./loop.ts";
 import type { Pricing } from "./usage.ts";
@@ -40,7 +41,7 @@ export function selectModel(models: ModelEntry[], id?: string): ModelEntry {
 
 const PROVIDERS: Record<ModelEntry["provider"], Provider | null> = {
   deepseek,
-  gemini: null, // nerve's first self-hosted task (D11) — Claude doesn't build it
+  gemini, // raw v1beta client, src/providers/gemini.ts (D11's designated first self-hosted target)
 };
 
 function keyFor(provider: ModelEntry["provider"]): string | undefined {

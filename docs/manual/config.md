@@ -7,8 +7,9 @@
 **How it works:**
 - `loadModels(path?)` reads the committed `config/models.json` (resolved against the install dir).
 - `selectModel(models, id?)` picks by id, else the `default` entry, else the first.
-- `providerFor(entry)` returns the `Provider` and checks its key in `Bun.env` — `deepseek` is wired;
-  `gemini` is `null` (nerve's first self-hosted task, [D11](../DECISIONS.md)) and throws a clear error.
+- `providerFor(entry)` returns the `Provider` and checks its key in `Bun.env`; both `deepseek` and
+  `gemini` are wired now. `fallbacksFor(models, active)` builds the [D15](../DECISIONS.md) ladder from
+  catalog entries after `active` that are usable (implemented provider + key present).
 - `index.ts` (the kernel runner) boots: **`preflight()`** (exit if a required external dep — the shell
   or `git` — is missing on PATH) → `loadModels → selectModel → providerFor`, builds a `Session`
   (or resumes), reads `prompts/system.md`, and drives `loop` — one-shot with `-p "…"` or a stdin REPL,

@@ -215,6 +215,12 @@ task (Gemini) exercises exactly that on a small, verifiable scope, and surfaces 
 non-trivial feature nerve lands on itself (the **LSP client** is the natural trophy), are the
 milestones that validate the self-hackability thesis.
 
+**Update (2026-06-07).** The **Gemini provider was hand-built by Claude Code at the user's request**
+(`src/providers/gemini.ts`) and **live-verified** end-to-end — streaming, function calling, and the
+strict `thoughtSignature` replay (no 400). So the *designated* "first self-hosted task" was instead
+Claude-authored; the self-hack thesis now rides on nerve landing the next non-trivial feature on
+itself (LSP stays the trophy). Both providers are wired in `config.ts`; the [D15](#d15--resilience-transient-error-auto-retry-with-model-ladder-fallback) fallback ladder is now genuinely cross-provider.
+
 **Rejected.** nerve building its own Phase 1 kernel (bootstrap paradox + agent-authored guardrails +
 uncontained failures); Claude Code building everything through Phase 2 (defeats the purpose; misses
 early discovery of nerve-legibility problems).

@@ -18,17 +18,28 @@ test("selectModel: by id, default fallback, and unknown throws", () => {
   expect(selectModel([{ id: "only", provider: "deepseek" as const }]).id).toBe("only"); // first fallback
 });
 
-test("providerFor: deepseek needs its key; gemini is not implemented", () => {
+test("providerFor: each provider needs its key, then resolves", () => {
+  const withKey = (name: "DEEPSEEK_API_KEY" | "GEMINI_API_KEY", fn: () => void): void => {
+    const saved = Bun.env[name];
+    try {
+      Bun.env[name] = "test-key";
+      fn();
+    } finally {
+      if (saved === undefined) delete Bun.env[name];
+      else Bun.env[name] = saved;
+    }
+  };
+
   const ds = { id: "deepseek-v4-flash", provider: "deepseek" as const };
-  const saved = Bun.env.DEEPSEEK_API_KEY;
+  const ge = { id: "gemini-3.5-flash", provider: "gemini" as const };
+  withKey("DEEPSEEK_API_KEY", () => expect(providerFor(ds).name).toBe("deepseek"));
+  withKey("GEMINI_API_KEY", () => expect(providerFor(ge).name).toBe("gemini"));
+
+  const savedG = Bun.env.GEMINI_API_KEY;
   try {
-    Bun.env.DEEPSEEK_API_KEY = "test-key";
-    expect(providerFor(ds).name).toBe("deepseek");
-    delete Bun.env.DEEPSEEK_API_KEY;
-    expect(() => providerFor(ds)).toThrow(/DEEPSEEK_API_KEY is not set/);
+    delete Bun.env.GEMINI_API_KEY;
+    expect(() => providerFor(ge)).toThrow(/GEMINI_API_KEY is not set/);
   } finally {
-    if (saved === undefined) delete Bun.env.DEEPSEEK_API_KEY;
-    else Bun.env.DEEPSEEK_API_KEY = saved;
+    if (savedG !== undefined) Bun.env.GEMINI_API_KEY = savedG;
   }
-  expect(() => providerFor({ id: "g", provider: "gemini" as const })).toThrow(/isn't implemented yet/);
 });

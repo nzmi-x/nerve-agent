@@ -220,7 +220,10 @@ Encrypted reasoning context returned on parts. Rules:
   there, omit from the others. Wrong interleaving (`FC1+sig, FR1, FC2, FR2`) errors — correct order is
   `FC1+sig, FC2, FR1, FR2`.
 - May also appear on the final **text** part; replaying those is **recommended** (not enforced; omitting degrades quality).
-- ⚠ Field casing: docs show both `thoughtSignature` (REST/JSON) and `thought_signature` (proto/SDK) — confirm the exact wire key on implementation.
+- ✅ **Field casing resolved (live-verified 2026-06-07):** the v1beta REST stream uses **`thoughtSignature`**
+  (camelCase); `thought_signature` (snake_case) only appears in the OpenAI-compat layer. `gemini.ts`
+  **writes** camelCase and **reads** `thoughtSignature ?? thought_signature` for safety. End-to-end tool
+  call + replay confirmed (no 400) against `gemini-3.5-flash`.
 
 ### 2.7 Structured output (optional; tools usually suffice)
 `generationConfig.responseMimeType:"application/json"` + `responseSchema` (or `responseJsonSchema`).
@@ -254,7 +257,8 @@ Composable with function calling. nerve relies on tool calls for structure, so t
   reasoning-router interceptor → dimmed/foldable TUI region.
 
 ## 5. Open items to confirm empirically (promote to DECISIONS.md when resolved)
-1. Exact wire casing of Gemini's `thoughtSignature` vs `thought_signature` on the v1beta REST stream (§2.6).
+1. ✅ **Resolved (2026-06-07).** Gemini wire key is **`thoughtSignature`** (camelCase) on the v1beta REST
+   stream; `gemini.ts` writes camelCase, reads either. Full tool-call + signature replay verified live.
 2. `gemini-3.5-pro` exact id + availability once released (use `gemini-3.1-pro-preview` until then).
 3. DeepSeek streaming `tool_calls` fragment shape under real load (the guide showed non-streaming);
    verify args arrive incrementally by `index` as the API ref implies.
