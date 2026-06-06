@@ -20,6 +20,9 @@
 **How to change it:**
 - Add a model → edit `config/models.json` (+ its schema); no code change.
 - Wire a new provider → add it to the `PROVIDERS` map. Keys stay in `.env`, never in the catalog.
+- LSP servers live in the parallel `config/lsp.json` (same pattern: committed catalog + schema, with a
+  `~/.nerve/lsp.json` override, [D22](../DECISIONS.md)). See [lsp](lsp.md). The `Lsp` manager is created
+  at boot (unless `--no-lsp`) and passed to tools via `ctx.lsp`.
 
 **Gotchas:**
 - The interactive OpenTUI front-end isn't built yet — `index.ts` is headless for now (the TUI is the

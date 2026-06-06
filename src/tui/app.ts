@@ -36,6 +36,7 @@ import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest } from "../tools/types.ts";
+import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
 // Tokyo Night palette
@@ -98,6 +99,7 @@ export interface TuiOptions {
   skills: CommandInfo[];
   commands: Command[];
   compactionPrompt: string;
+  lsp?: Lsp;
 }
 
 interface Suggestion {
@@ -513,7 +515,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask },
+        ctx: { cwd, ask, lsp: opts.lsp },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
@@ -561,6 +563,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     shuttingDown = true;
     turnAbort?.abort();
     await session.close();
+    await opts.lsp?.stop();
     renderer.destroy();
     process.exit(0);
   }

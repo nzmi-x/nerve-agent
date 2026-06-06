@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nerve.local/lsp.schema.json",
   "title": "nerve LSP server catalog",
-  "description": "Committed catalog of language servers. Maps file extensions to a server nerve spawns over stdio (raw JSON-RPC). Servers start lazily on the first file of a matching type, are kept warm, and are killed on exit. Add a language = add an entry here.",
+  "description": "Committed catalog of language servers. Maps file extensions to servers nerve spawns over stdio (raw JSON-RPC). MULTIPLE servers may share an extension (e.g. Python uses pyrefly + ruff) — diagnostics aggregate from all, queries route to whichever advertises the capability. Servers start lazily on the first file of a matching type, are kept warm, and are killed on exit. nerve does NOT install servers; a missing one raises an actionable error (see `install`). Add a language = add an entry here.",
   "type": "object",
   "required": ["servers"],
   "additionalProperties": false,
@@ -38,6 +38,10 @@
           "type": "string",
           "minLength": 1,
           "description": "Executable to spawn. Must be on PATH (nerve does not install servers)."
+        },
+        "install": {
+          "type": "string",
+          "description": "Install command shown when the server isn't on PATH (e.g. \"uv tool install pyrefly\", \"bun install -g @vtsls/language-server\")."
         },
         "args": {
           "type": "array",

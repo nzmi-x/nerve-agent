@@ -21,6 +21,8 @@ export interface ToolContext {
    * recommended option. The `ask_user` tool falls back to the recommendation if this is absent.
    */
   ask?: (req: AskRequest) => Promise<string>;
+  /** Language-server manager (D10) — `read`/`write`/`edit` append diagnostics, the `lsp` tool queries. */
+  lsp?: import("../lsp/manager.ts").Lsp;
 }
 
 export interface Tool {

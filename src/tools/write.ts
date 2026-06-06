@@ -16,8 +16,10 @@ export const write: Tool = {
   async run(args, ctx) {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
     if (typeof args.content !== "string") return "Error: 'content' must be a string";
-    await Bun.write(resolve(ctx.cwd, args.path), args.content); // creates parent dirs
+    const abs = resolve(ctx.cwd, args.path);
+    await Bun.write(abs, args.content); // creates parent dirs
     const n = args.content === "" ? 0 : args.content.replace(/\n$/, "").split("\n").length;
-    return `Wrote ${args.path} (${n} line${n === 1 ? "" : "s"})`;
+    const head = `Wrote ${args.path} (${n} line${n === 1 ? "" : "s"})`;
+    return ctx.lsp ? head + (await ctx.lsp.diagnostics(abs, args.content)) : head; // D10: did I break it?
   },
 };

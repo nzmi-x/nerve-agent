@@ -10,6 +10,7 @@ import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
+import { Lsp } from "./src/lsp/manager.ts";
 import type { Mode } from "./src/dispatch.ts";
 import type { Provider } from "./src/providers/types.ts";
 import type { AskRequest } from "./src/tools/types.ts";
@@ -23,6 +24,7 @@ const arg = (name: string): string | undefined => {
 const mode: Mode = arg("--mode") === "plan" ? "plan" : "edit";
 const prompt = arg("-p") ?? arg("--print");
 const resume = arg("--resume");
+const noLsp = argv.includes("--no-lsp");
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -73,7 +75,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     session,
     model: entryId,
     mode,
-    ctx: { cwd: process.cwd(), ask: headlessAsk },
+    ctx: { cwd: process.cwd(), ask: headlessAsk, lsp },
     interceptors: [secretRedaction(), reasoningRouter((d) => out(DIM + d + RESET)), tokenTap(session)],
     signal: ac.signal,
     system: systemPrompt(),
@@ -116,6 +118,7 @@ if (resume) {
 const session = new Session(resumeId ? { id: resumeId, resume: true } : {});
 const thinking = entry.thinking ?? false; // D11 kernel default: thinking off
 const fallbacks = fallbacksFor(models, entry); // D15 model ladder
+const lsp = noLsp ? undefined : new Lsp(process.cwd()); // D10: diagnostics-on-edit + the `lsp` tool
 out(`${DIM}nerve · ${entry.id} (${entry.provider}) · ${mode.toUpperCase()} · session ${session.id}${RESET}\n`);
 
 if (prompt) {
@@ -123,6 +126,7 @@ if (prompt) {
   session.addUser(prompt);
   await runTurn(session, entry.id, thinking, entry.temperature, provider, fallbacks);
   await session.close();
+  await lsp?.stop();
 } else if (process.stdin.isTTY) {
   // interactive: the OpenTUI front-end (loaded lazily so headless runs don't pull in the renderer)
   const { runTui } = await import("./src/tui/app.ts");
@@ -131,7 +135,7 @@ if (prompt) {
   const cwd = process.cwd();
   const skills = await discoverSkills(skillRoots(cwd));
   const commands = await discoverCommands(commandRoots(cwd));
-  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt() });
+  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt(), lsp });
 } else {
   // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);
@@ -146,4 +150,5 @@ if (prompt) {
     out("> ");
   }
   await session.close();
+  await lsp?.stop();
 }

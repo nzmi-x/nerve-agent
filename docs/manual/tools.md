@@ -1,6 +1,6 @@
 # tools
 
-**Status:** built (Phase 1) — read, write, edit, bash, ls, grep, glob, manual, ask_user · `lsp` joins in Phase 2
+**Status:** built (Phase 1.5) — read, write, edit, bash, ls, grep, glob, manual, ask_user, **lsp** ([D10](../DECISIONS.md), see [lsp](lsp.md))
 **What:** the local tool set the model calls. Each is a plain object run as a direct Bun call —
 no daemon, no RPC. The registry exposes them to the providers and to the dispatcher.
 **Code:** `src/tools/types.ts` (the `Tool` contract) · `src/tools/registry.ts` · `src/tools/*.ts`
@@ -28,6 +28,10 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `ask_user` ([D14](../DECISIONS.md)) asks the human a question via `ctx.ask` (the surface supplies it:
   the TUI renders an interactive picker, headless auto-recommends). `readonly` → usable in PLAN. The
   contract: 2–4 options, mark one `recommended` unless they're equivalent.
+- `lsp` ([D10](../DECISIONS.md), [lsp](lsp.md)) — read-only language-server queries (definition/
+  references/hover/documentSymbol/…) via `ctx.lsp`. **Separately**, `read`/`write`/`edit` append
+  language-server **diagnostics** to their results (the agent sees breakage immediately). Both no-op
+  when `ctx.lsp` is absent (`--no-lsp`, or no server for the file's language).
 
 **Hot-swap ([D7](../DECISIONS.md)):** the active set is a **mutable** `let tools` in `registry.ts`;
 `reloadTools()` re-imports every entry in `TOOL_MODULES` **cache-busted** (`import("./x.ts?t=…")`) and

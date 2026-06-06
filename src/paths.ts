@@ -49,6 +49,11 @@ export function globalModelsPath(): string {
   return join(nerveHome(), "models.json");
 }
 
+/** Optional global LSP catalog; overrides the bundled `config/lsp.json` when present. */
+export function globalLspPath(): string {
+  return join(nerveHome(), "lsp.json");
+}
+
 /** Create the project + global skill/command/session dirs so they exist and are discoverable. */
 export function ensureLayout(cwd: string = process.cwd()): void {
   for (const d of [

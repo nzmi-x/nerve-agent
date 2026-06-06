@@ -149,34 +149,45 @@ async interceptors (would block the hot per-delta path — sync stays fast and p
 1. **Automatic diagnostics.** After `edit`/`write` (and on `read`), nerve queries the matching
    language server and **appends a formatted diagnostics block** (errors/warnings with line refs)
    to the tool result — so the agent sees immediately whether it broke the file and self-corrects.
-2. **An `lsp` query tool** — one tool with an `operation` enum: `goToDefinition`, `findReferences`,
-   `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, and call-hierarchy
-   (`prepareCallHierarchy`/`incomingCalls`/`outgoingCalls`). Args: `filePath`, `line`, `character`
+2. **An `lsp` query tool** — one tool with an `op` enum: `definition`, `references`, `implementation`,
+   `typeDefinition`, `hover`, `documentSymbol`, `workspaceSymbol`. Args: `path`, `line`, `character`
    (1-based, editor coords), plus `query` for `workspaceSymbol`. It is `readonly: true`, so it
    works in **PLAN mode** too — navigation/context-gathering and diagnosis are read-only.
 
-**Client.** A **raw JSON-RPC-over-stdio** client, **zero dependencies** (~200 lines): `Bun.spawn`
-the server, Content-Length framing, request↔response id correlation, `textDocument/didOpen` +
-`didChange` document sync, cache `publishDiagnostics` by URI, and the `initialize`/`shutdown`
-lifecycle. Lives in `src/lsp/` (`client.ts` = transport+lifecycle, `index.ts` = manager: extension
-routing, lazy spawn, diagnostics formatting, query ops).
+**Client.** A **raw JSON-RPC-over-stdio** client, **zero dependencies**: `Bun.spawn` the server,
+Content-Length byte-framing, request↔response id correlation, answering the few server→client requests
+(`workspace/configuration` etc.) so it can't hang, `textDocument/didOpen`+`didChange` sync, cache
+`publishDiagnostics` by URI, capture server `capabilities`, and the `initialize`/`shutdown` lifecycle.
+`src/lsp/`: `client.ts` (one connection), `manager.ts` (catalog, lazy spawn, root detection,
+diagnostics aggregation, capability-routed queries), `format.ts` (pure result mappers).
 
-**Config.** A committed **`config/lsp.json`** (+ **`config/lsp.schema.json`** via inline `$schema`,
-IntelliSense like `models.json`) maps `extensions → { id, command, args, rootMarkers? }`. Servers spawn
-**lazily** on the first file of a matching type, are kept warm, and are killed on exit. nerve does
-**not** install servers — `command` must be on PATH. Seeded with **TypeScript**
-(`typescript-language-server --stdio`), since nerve itself is TS, so post-edit diagnostics directly
-serve the self-hacking mandate ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
+**Config.** A committed **`config/lsp.json`** (+ schema, IntelliSense like `models.json`; a
+`~/.nerve/lsp.json` overrides it, [D22](#d22--all-state-lives-under-nerve-namespaced-per-project-not-in-the-repo)).
+Each entry is `{ id, extensions, command, args?, rootMarkers?, install? }`. **MULTIPLE servers may share
+an extension** — Python runs **pyrefly** (`pyrefly lsp`: types/hover/defs) **+ ruff** (`ruff server`:
+lint) at once; diagnostics aggregate (tagged by server), queries route to whichever **advertises the
+capability** (ruff has no `definitionProvider`, so it's auto-skipped for queries). Servers spawn
+**lazily** per file's language, kept warm, killed on exit. Seeded: **vtsls** (`vtsls --stdio`) for TS/JS,
+**pyrefly + ruff** for Python.
 
-**Why.** Diagnostics-on-edit is the single highest-frequency win for a coding agent (catch breakage
-without a round-trip through `bash tsc`); the query tool is high-reuse for context-gathering
+**Ship vs. require → require, error clearly.** nerve does **not** bundle/install servers; `command`
+must be on PATH. A missing server **degrades gracefully** with an actionable hint from the entry's
+`install` field (e.g. `uv tool install pyrefly`, `bun install -g @vtsls/language-server`) — never a
+hard crash. Diagnostics are best-effort (a fixed settle window after sync); `--no-lsp` disables it.
+**Ruff is diagnostics-only, never auto-format** — auto-formatting after an `edit` would instantly
+stale the hashline anchors ([D3](#d3--edit-mechanism-hashline-only-content-anchored)).
+
+**Why.** Diagnostics-on-edit is the highest-frequency win for a coding agent (catch breakage without a
+`bash tsc` round-trip); the query tool is high-reuse context-gathering
 ([D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)). Raw client keeps it
-dependency-free and fully hackable, matching the raw-fetch provider ethos. Schema-backed JSON config
-stays consistent with [D5](#d5--model-selection-keys-in-env-models-in-a-committed-catalog).
-**Rejected.** A `vscode-jsonrpc`/full LSP client library (deps + less hackable); auto-detecting
-servers from PATH (implicit/magic); diagnostics-only or query-only (the user wants both seams).
-**Phase.** Built in **Phase 2**, after the Phase 1 core loop + tools work end to end (LSP depends on
-`read`/`edit`/`write` and the registry existing). Designed now so the tool surface accounts for it.
+dependency-free and hackable, matching the raw-fetch provider ethos. Requiring pre-installed servers
+matches the user's `uv`/bun toolchain and keeps nerve lean (no cross-platform binary bundling/rot).
+**Rejected.** A `vscode-jsonrpc`/full LSP library (deps + less hackable); **shipping** the servers
+(bloat, platform-specific, version drift — the user installs them); one-server-per-extension (Python
+needs pyrefly **and** ruff); ruff auto-format on edit (breaks hashline); auto-detecting servers from PATH.
+**Phase.** **Built (Phase 1.5)** and live-verified against pyrefly + ruff (aggregated diagnostics,
+hover, documentSymbol, missing-server hint). vtsls path verified for the missing-server case (install
+to exercise live). Rust/Zig servers deferred (just add catalog entries when wanted).
 
 ## D11 — Bootstrapping: Claude Code builds a trustworthy kernel, then nerve self-hosts
 **Decision.** nerve is built by **self-hosting**, but not from zero. **Claude Code (Phase 1)

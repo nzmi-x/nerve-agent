@@ -2,11 +2,28 @@
   "$schema": "./lsp.schema.json",
   "servers": [
     {
-      "id": "typescript",
+      "id": "vtsls",
       "extensions": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-      "command": "typescript-language-server",
+      "command": "vtsls",
       "args": ["--stdio"],
-      "rootMarkers": ["tsconfig.json", "package.json"]
+      "rootMarkers": ["tsconfig.json", "jsconfig.json", "package.json", ".git"],
+      "install": "bun install -g @vtsls/language-server"
+    },
+    {
+      "id": "pyrefly",
+      "extensions": [".py", ".pyi", ".ipynb"],
+      "command": "pyrefly",
+      "args": ["lsp"],
+      "rootMarkers": ["pyproject.toml", "setup.py", "setup.cfg", "pyrefly.toml", ".git"],
+      "install": "uv tool install pyrefly"
+    },
+    {
+      "id": "ruff",
+      "extensions": [".py", ".pyi", ".ipynb"],
+      "command": "ruff",
+      "args": ["server"],
+      "rootMarkers": ["pyproject.toml", "ruff.toml", ".ruff.toml", ".git"],
+      "install": "uv tool install ruff"
     }
   ]
 }

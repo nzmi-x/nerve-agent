@@ -47,6 +47,8 @@ export const edit: Tool = {
     await Bun.write(resolve(ctx.cwd, args.path), result.content);
     const n = result.content === "" ? 0 : result.content.replace(/\n$/, "").split("\n").length;
     const head = `Applied ${args.edits.length} edit(s) to ${args.path} (${n} lines)`;
-    return n > REANCHOR_CAP ? head : `${head}\nUpdated anchors:\n${encode(result.content)}`;
+    const body = n > REANCHOR_CAP ? head : `${head}\nUpdated anchors:\n${encode(result.content)}`;
+    // D10: append language-server diagnostics so the agent sees breakage immediately.
+    return ctx.lsp ? body + (await ctx.lsp.diagnostics(resolve(ctx.cwd, args.path), result.content)) : body;
   },
 };

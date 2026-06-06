@@ -16,9 +16,12 @@ export const read: Tool = {
   readonly: true,
   async run(args, ctx) {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
-    const file = Bun.file(resolve(ctx.cwd, args.path));
+    const abs = resolve(ctx.cwd, args.path);
+    const file = Bun.file(abs);
     if (!(await file.exists())) return `Error: no such file: ${args.path}`;
     const content = (await file.text()).replaceAll("\r\n", "\n");
-    return content === "" ? "(empty file)" : encode(content);
+    const body = content === "" ? "(empty file)" : encode(content);
+    // Prime the language server + surface any already-known diagnostics (no settle wait — D10).
+    return ctx.lsp ? body + (await ctx.lsp.diagnostics(abs, content, false)) : body;
   },
 };
