@@ -5,9 +5,14 @@ import type { Tool } from "./types.ts";
 import { read } from "./read.ts";
 import { write } from "./write.ts";
 import { edit } from "./edit.ts";
+import { bash } from "./bash.ts";
+import { ls } from "./ls.ts";
+import { grep } from "./grep.ts";
+import { glob } from "./glob.ts";
+import { manual } from "./manual.ts";
 
-/** The Phase-1 tool set. bash, search (ls/grep/glob), and `manual` land in the next slice. */
-export const tools: readonly Tool[] = [read, write, edit];
+/** The Phase-1 tool set. `lsp` joins in Phase 2. */
+export const tools: readonly Tool[] = [read, write, edit, bash, ls, grep, glob, manual];
 
 export function toolByName(name: string): Tool | undefined {
   return tools.find((t) => t.name === name);

@@ -1,6 +1,6 @@
 # tools
 
-**Status:** read/write/edit built (Phase 1) · bash/search/manual pending
+**Status:** built (Phase 1) — read, write, edit, bash, ls, grep, glob, manual · `lsp` joins in Phase 2
 **What:** the local tool set the model calls. Each is a plain object run as a direct Bun call —
 no daemon, no RPC. The registry exposes them to the providers and to the dispatcher.
 **Code:** `src/tools/types.ts` (the `Tool` contract) · `src/tools/registry.ts` · `src/tools/*.ts`
@@ -17,6 +17,13 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `read` emits `hashline.encode` (`LINE#HASH:content`); `edit` drives `hashline.applyEdits` and, on a
   stale anchor, returns the rejection + fresh anchors; on success (small files) it echoes updated
   anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`).
+- `bash` runs `bash -c` via `Bun.spawn` (combined stdout+stderr, 2-min kill timeout, output capped).
+  `ls`/`glob`/`grep` are readonly search — `Bun.Glob` for matching, pure-JS line scan for grep
+  (dependency-free; skips `node_modules`/`.git`/`references`/binary/huge files). `bash` is *not*
+  interruptible by ESC yet (only the timeout stops it) — `ToolContext` has no signal.
+- `manual` (self-docs, [D13](../DECISIONS.md)) serves `docs/manual/*.md` + `docs/*.md` + the `opentui`
+  skill, resolved against nerve's **install dir** (`import.meta.dir`), not `cwd`. OpenTUI is lazy:
+  `manual("opentui"[/<slug>])`. Topic index is the filesystem; manual pages win same-name collisions.
 
 **How to change it:**
 - **Add a tool** = a new `src/tools/<name>.ts` exporting a `Tool`, then add it to `tools` in

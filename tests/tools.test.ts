@@ -87,7 +87,7 @@ test("registry: unique names, lookup, and readonly flags", () => {
 
 test("registry: toolSpecs exposes name/description/parameters only", () => {
   const specs = toolSpecs();
-  expect(specs.map((s) => s.name).sort()).toEqual(["edit", "read", "write"]);
+  expect(specs.map((s) => s.name).sort()).toEqual(tools.map((t) => t.name).sort());
   for (const s of specs) {
     expect(typeof s.description).toBe("string");
     expect((s.parameters as { type: string }).type).toBe("object");
