@@ -107,8 +107,8 @@ nerve/
 │   │   ├── types.ts     # StreamEvent union + Provider interface (the contract)
 │   │   ├── gemini.ts    # raw Gemini streamGenerateContent client → StreamEvent
 │   │   └── deepseek.ts  # raw DeepSeek (OpenAI-shaped) client → StreamEvent
-│   ├── tools/           # registry (hot-swappable): read, write, edit, bash, grep, glob, ls, manual
-│   │   └── index.ts
+│   ├── tools/           # one file per tool + registry.ts (read, write, edit, bash, grep, glob, ls, manual)
+│   │   └── registry.ts
 │   └── tui/
 │       └── app.ts       # OpenTUI views: transcript, streaming md/diff, reasoning fold, status line
 ├── tests/               # bun:test, colocated by concern
