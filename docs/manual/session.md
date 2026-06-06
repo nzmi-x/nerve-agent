@@ -13,9 +13,15 @@ assistant turn and persists the transcript as typed-line JSONL.
 - `commitAssistant()` finalizes the buffer into an assistant `Message` — **including the reasoning
   artifact** (`reasoning`, and each tool call's `signature`) needed to replay to the providers
   ([providers.md §0](../providers.md)) — appends it, persists a `msg` line, and resets the buffer.
-- Persistence is **typed JSONL** at `.nerve/sessions/<id>.jsonl`: `{"t":"msg",…}` canonical messages
-  and `{"t":"delta",…}` token-tap telemetry. `tap(ev)` writes delta lines; `loadMessages()` reads
-  back **only** the `msg` lines, so resume rebuilds from messages, not from thousands of deltas.
+- Persistence is **typed JSONL** at `.nerve/sessions/<id>.jsonl`: `{"t":"msg",…}` canonical messages,
+  `{"t":"delta",…}` token-tap telemetry, and `{"t":"compaction",summary,firstKept}` markers ([D17](../DECISIONS.md)).
+  `tap(ev)` writes delta lines; `loadSession()` reads back the `msg` lines (deltas ignored) and applies
+  the **latest** compaction marker — `messages = [summary, …allMsgs.slice(firstKept)]`.
+- **Compaction ([D17](../DECISIONS.md)).** `discardAssistant()` drops a failed in-progress turn (retry,
+  [D15](../DECISIONS.md)). `compact(summary, keepCount)` replaces live context with
+  `[summaryMessage, …last keepCount msgs]` and appends a compaction marker — the log is **never
+  rewritten**. `totalMsgs` is the global ordinal `firstKept` anchors against; a summary is *not* a `msg`
+  line, so it doesn't advance it and kept messages keep their original ordinals across compactions.
 
 **How to change it:**
 - A new message field → extend `Message` (in `providers/types.ts`) and make sure `commitAssistant`
@@ -25,6 +31,8 @@ assistant turn and persists the transcript as typed-line JSONL.
 
 **Gotchas:**
 - `close()` flushes the sink — call it on exit or the tail of the log can be lost.
-- `loadMessages` skips malformed lines rather than failing the whole resume.
+- `loadSession`/`loadMessages` skip malformed lines rather than failing the whole resume.
+- `compact`'s `keepCount` counts **real** kept messages (from `pickCutPoint`) — never include a prior
+  synthetic summary in it, or `firstKept` ordinals drift.
 
-**See:** [ARCHITECTURE_BRIEF §6](../ARCHITECTURE_BRIEF.md) · [providers.md §0](../providers.md) · [loop](loop.md)
+**See:** [ARCHITECTURE_BRIEF §6](../ARCHITECTURE_BRIEF.md) · [providers.md §0](../providers.md) · [compaction](compaction.md) · [loop](loop.md)

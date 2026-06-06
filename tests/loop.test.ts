@@ -104,6 +104,82 @@ test("loop: a stop-guard ends the turn without dispatching tools", async () => {
   await session.close();
 });
 
+test("loop: a transient error falls down the model ladder and recovers (D15)", async () => {
+  const session = new Session({ id: "R", dir });
+  session.addUser("hi");
+  const primary = fakeProvider([[{ type: "error", error: new Error("DeepSeek 429: too many requests") }, { type: "done", reason: "error" }]]);
+  const fallback = fakeProvider([[{ type: "text", delta: "recovered" }, { type: "done", reason: "stop" }]]);
+  const retries: string[] = [];
+  let errored = false;
+
+  await loop({
+    provider: primary,
+    session,
+    model: "deepseek-v4-flash",
+    mode: "edit",
+    ctx: { cwd: dir },
+    interceptors: [],
+    signal: new AbortController().signal,
+    fallbacks: [{ provider: fallback, model: "deepseek-v4-pro" }],
+    onRetry: (i) => retries.push(i.model),
+    onError: () => (errored = true),
+  });
+
+  expect(errored).toBe(false);
+  expect(retries).toEqual(["deepseek-v4-pro"]); // ladder switch, delay 0
+  expect(session.messages.map((m) => m.role)).toEqual(["user", "assistant"]); // failed turn not committed
+  expect(session.messages[1]!.content).toBe("recovered");
+  await session.close();
+});
+
+test("loop: backs off and retries the same candidate when there is no fallback (D15)", async () => {
+  const session = new Session({ id: "B", dir });
+  session.addUser("hi");
+  const provider = fakeProvider([
+    [{ type: "error", error: new Error("overloaded") }, { type: "done", reason: "error" }],
+    [{ type: "text", delta: "ok" }, { type: "done", reason: "stop" }],
+  ]);
+  let attempts = 0;
+  await loop({
+    provider,
+    session,
+    model: "m",
+    mode: "edit",
+    ctx: { cwd: dir },
+    interceptors: [],
+    signal: new AbortController().signal,
+    retry: { baseDelayMs: 1, maxDelayMs: 2 },
+    onRetry: () => attempts++,
+  });
+  expect(attempts).toBe(1);
+  expect(session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  expect(session.messages[1]!.content).toBe("ok");
+  await session.close();
+});
+
+test("loop: a non-transient error gives up via onError, no retry, nothing committed (D15)", async () => {
+  const session = new Session({ id: "E", dir });
+  session.addUser("hi");
+  const provider = fakeProvider([[{ type: "error", error: new Error("DeepSeek 400: bad request") }, { type: "done", reason: "error" }]]);
+  let captured: unknown = null;
+  let retried = false;
+  await loop({
+    provider,
+    session,
+    model: "m",
+    mode: "edit",
+    ctx: { cwd: dir },
+    interceptors: [],
+    signal: new AbortController().signal,
+    onRetry: () => (retried = true),
+    onError: (e) => (captured = e),
+  });
+  expect(retried).toBe(false);
+  expect(captured).toBeInstanceOf(Error);
+  expect(session.messages.map((m) => m.role)).toEqual(["user"]); // no assistant committed
+  await session.close();
+});
+
 test("loop: maxTurns caps a runaway tool-calling model", async () => {
   const session = new Session({ id: "M", dir });
   session.addUser("loop forever");
