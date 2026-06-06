@@ -89,8 +89,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     paddingLeft: 1,
     paddingRight: 1,
   });
-  const popup = new TextRenderable(renderer, { id: "popup", content: "", fg: DIM, paddingLeft: 1 });
-  const status = new TextRenderable(renderer, { id: "status", content: "", bg: "#1f2335" });
+  const popup = new TextRenderable(renderer, { id: "popup", content: "", height: 0, flexShrink: 0, fg: DIM, paddingLeft: 1 });
+  const status = new TextRenderable(renderer, { id: "status", content: "", height: 1, flexShrink: 0, bg: "#1f2335" });
   const input = new InputRenderable(renderer, {
     id: "input",
     width: "100%",
@@ -117,6 +117,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     lines.length = 0;
   };
 
+  // Single source of truth for the popup row — content AND height together, so an empty popup is
+  // exactly 0 rows and the flex column never mis-reflows the status line / input.
+  const setPopup = (content: string, fg = DIM): void => {
+    popup.content = content;
+    popup.fg = fg;
+    popup.height = content === "" ? 0 : content.split("\n").length;
+  };
+
   const setStatus = (): void => {
     const s = meter.snapshot();
     status.content = ` ${active.id} · ${mode === "plan" ? "PLAN" : "YOLO"} · ${formatCost(s.costUsd)} · ctx ${formatContext(s.contextTokens, active.contextWindow)} · bal ${formatBalance(balance)}${busy ? " · …" : ""}`;
@@ -126,15 +134,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const suggestOpen = (): boolean => suggest.items.length > 0;
   const clearSuggest = (): void => {
     suggest = { kind: "none", items: [], sel: 0 };
-    if (!asking) popup.content = "";
+    if (!asking) setPopup("");
   };
   const renderSuggest = (): void => {
-    if (asking || suggest.items.length === 0) {
-      if (!asking) popup.content = "";
-      return;
-    }
-    popup.fg = DIM;
-    popup.content = suggest.items.map((it, i) => `${i === suggest.sel ? "▶ " : "  "}${it.label}`).join("\n");
+    if (asking) return;
+    setPopup(suggest.items.map((it, i) => `${i === suggest.sel ? "▶ " : "  "}${it.label}`).join("\n"), DIM);
   };
   async function updateSuggestions(value: string): Promise<void> {
     if (asking) return;
@@ -165,8 +169,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     asking.req.options.forEach((o, i) => {
       rows.push(`${i === asking!.sel ? "▶ " : "  "}${o.label}${o.recommended ? " (recommended)" : ""}${o.description ? ` — ${o.description}` : ""}`);
     });
-    popup.fg = ACCENT;
-    popup.content = rows.join("\n");
+    setPopup(rows.join("\n"), ACCENT);
   };
   function ask(req: AskRequest): Promise<string> {
     return new Promise((resolve) => {
@@ -352,7 +355,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       } else if (key.name === "return") {
         const a = asking;
         asking = null;
-        popup.content = "";
+        setPopup("");
         a.resolve(a.req.options[a.sel]!.label);
       }
       return;
