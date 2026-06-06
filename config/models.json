@@ -5,27 +5,36 @@
       "id": "deepseek-v4-flash",
       "provider": "deepseek",
       "label": "Flash — simple edits, context-gathering, subagents",
-      "default": true
+      "default": true,
+      "contextWindow": 1000000,
+      "pricing": { "input": 0.14, "cachedInput": 0.0028, "output": 0.28 }
     },
     {
       "id": "deepseek-v4-pro",
       "provider": "deepseek",
-      "label": "Pro — slightly complex tasks"
+      "label": "Pro — slightly complex tasks",
+      "contextWindow": 1000000,
+      "pricing": { "input": 0.435, "cachedInput": 0.003625, "output": 0.87 }
     },
     {
       "id": "gemini-3.5-flash",
       "provider": "gemini",
-      "label": "Gemini Flash — fast capable (GA; default thinkingLevel medium)"
+      "label": "Gemini Flash — fast capable (GA; default thinkingLevel medium)",
+      "contextWindow": 1000000,
+      "pricing": { "input": 1.5, "output": 9.0 }
     },
     {
       "id": "gemini-3.1-pro-preview",
       "provider": "gemini",
-      "label": "Gemini Pro — current Pro tier (preview) until 3.5-pro ships; default thinkingLevel high"
+      "label": "Gemini Pro — current Pro tier (preview) until 3.5-pro ships; default thinkingLevel high",
+      "contextWindow": 1000000,
+      "pricing": { "input": 2.0, "output": 12.0 }
     },
     {
       "id": "gemini-3.5-pro",
       "provider": "gemini",
-      "label": "Gemini Pro — NOT RELEASED yet (placeholder for when it ships; will 404 until then)"
+      "label": "Gemini Pro — NOT RELEASED yet (placeholder for when it ships; will 404 until then)",
+      "contextWindow": 1000000
     }
   ]
 }

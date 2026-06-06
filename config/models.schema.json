@@ -50,6 +50,22 @@
         "thinking": {
           "type": "boolean",
           "description": "Optional: request the provider's reasoning/thinking mode for this model."
+        },
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max context window in tokens — drives the 'context used / max' indicator."
+        },
+        "pricing": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "USD per 1,000,000 tokens — drives session cost tracking. Omit for an unreleased/unknown model.",
+          "required": ["input", "output"],
+          "properties": {
+            "input": { "type": "number", "minimum": 0, "description": "Input (prompt) price per 1M tokens, USD (standard / cache-miss rate)." },
+            "cachedInput": { "type": "number", "minimum": 0, "description": "Optional cache-hit input price per 1M tokens, USD." },
+            "output": { "type": "number", "minimum": 0, "description": "Output (completion) price per 1M tokens, USD." }
+          }
         }
       }
     }
