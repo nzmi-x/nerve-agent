@@ -51,16 +51,35 @@ export function formatRun(nb: { cells?: NbCell[] }): string {
   return clip(`${header}\n${blocks.join("\n")}`, MAX_TOTAL_CHARS);
 }
 
+/** Pure: render `marimo check` output (marimo-specific lint — single-definition rule, cycles, formatting). */
+export function checkReport(stdout: string, stderr: string): string {
+  const text = `${stdout}\n${stderr}`.trim();
+  if (!text || /Found 0 issues|All checks passed/i.test(text)) return "marimo check: no issues.";
+  return clip(text, 4000);
+}
+
+/** Run a marimo subcommand in `cwd` via uv (provisions marimo; +nbformat for ipynb export). */
+async function marimo(sub: string[], cwd: string, nbformat: boolean): Promise<{ stdout: string; stderr: string }> {
+  const cmd = ["uv", "run", "--with", "marimo", ...(nbformat ? ["--with", "nbformat"] : []), "marimo", ...sub];
+  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+  const timer = setTimeout(() => proc.kill(), RUN_TIMEOUT_MS);
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  clearTimeout(timer);
+  return { stdout, stderr };
+}
+
 export const notebook: Tool = {
   name: "notebook",
   description:
-    "Run a marimo notebook (a `.py` file) headlessly and report each cell's output + errors. marimo " +
-    "notebooks are plain Python — read/edit/append cells with read/edit/write; call manual(\"marimo\") " +
-    "for the cell format. Executes code (EDIT mode only). Needs `uv` on PATH (provisions marimo).",
+    "Work with a marimo notebook (a `.py` file). op `run` (default) executes it headlessly and reports " +
+    "each cell's output + errors; op `check` runs marimo's fast static lint (the single-definition rule, " +
+    "cycles, formatting). marimo notebooks are plain Python — read/edit/append cells with read/edit/write; " +
+    "call manual(\"marimo\") for the format. Executes code (EDIT mode only). Needs `uv` on PATH.",
   parameters: {
     type: "object",
     properties: {
       path: { type: "string", description: "Path to the marimo notebook (.py)." },
+      op: { type: "string", enum: ["run", "check"], description: "`run` (execute + report outputs, default) or `check` (static marimo lint)." },
     },
     required: ["path"],
   },
@@ -71,19 +90,20 @@ export const notebook: Tool = {
     const nb = resolve(ctx.cwd, args.path);
     if (!(await Bun.file(nb).exists())) return `Error: no such file: ${args.path}`;
 
-    const out = join(tmpdir(), `nerve-nb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ipynb`);
-    const proc = Bun.spawn(
-      ["uv", "run", "--with", "marimo", "--with", "nbformat", "marimo", "export", "ipynb", nb, "-o", out, "--include-outputs"],
-      { cwd: ctx.cwd, stdout: "pipe", stderr: "pipe" },
-    );
-    const timer = setTimeout(() => proc.kill(), RUN_TIMEOUT_MS);
-    const [stderr] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-    clearTimeout(timer);
+    if (args.op === "check") {
+      const { stdout, stderr } = await marimo(["check", nb], ctx.cwd, false);
+      return checkReport(stdout, stderr);
+    }
 
+    // run: export to a temp .ipynb with outputs, then parse per-cell
+    const out = join(tmpdir(), `nerve-nb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ipynb`);
+    const { stderr } = await marimo(["export", "ipynb", nb, "-o", out, "--include-outputs"], ctx.cwd, true);
     const exported = Bun.file(out);
     if (!(await exported.exists())) {
-      // export failed outright (syntax error, bad notebook, uv resolution) — surface stderr
-      return `marimo run failed:\n${clip(stderr.trim() || "(no error output)", 2000)}`;
+      // structural failure (e.g. the single-definition rule) → marimo check gives the clearest diagnosis
+      const chk = await marimo(["check", nb], ctx.cwd, false);
+      const report = checkReport(chk.stdout, chk.stderr);
+      return `marimo run failed.\n${report === "marimo check: no issues." ? clip(stderr.trim() || "(no error output)", 2000) : report}`;
     }
     try {
       return formatRun(JSON.parse(await exported.text()) as { cells?: NbCell[] });

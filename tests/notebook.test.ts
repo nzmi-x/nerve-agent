@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test";
-import { formatRun } from "../src/tools/notebook.ts";
+import { formatRun, checkReport } from "../src/tools/notebook.ts";
+
+test("checkReport: surfaces marimo issues, else 'no issues'", () => {
+  expect(checkReport("", "")).toBe("marimo check: no issues.");
+  expect(checkReport("Found 0 issues", "")).toBe("marimo check: no issues.");
+  expect(checkReport("error: Variables must be unique across cells", "")).toContain("unique across cells");
+});
 
 test("formatRun: renders stdout / result / error / no-output code cells; skips markdown", () => {
   const out = formatRun({

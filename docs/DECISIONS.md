@@ -529,10 +529,13 @@ it. The system prompt is agent-editable/hot-swappable, so the style can be tuned
 **Decision.** nerve's notebook format is **marimo**, whose notebooks are **pure `.py`** (reactive — a
 cell DAG, no hidden kernel state). Consequences:
 - **Read/edit/append cells = the existing file tools.** It's `.py`, so `read`/`edit` (hashline) work
-  unchanged and **pyrefly + ruff diagnostics fire on every cell edit for free** ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)). No new editing machinery.
-- **Run = the `notebook` tool** (`src/tools/notebook.ts`, `readonly:false` → EDIT-only): runs the
-  notebook **headlessly** via `marimo export ipynb … --include-outputs` and parses the embedded
-  per-cell outputs/errors into a terse report. No server.
+  unchanged and **pyrefly + ruff diagnostics fire on every cell edit for free** ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)) — and marimo itself
+  *federates pyrefly* as its LSP, so this is the same intelligence marimo's own editor uses. No new editing machinery.
+- **Run/check = the `notebook` tool** (`src/tools/notebook.ts`, `readonly:false` → EDIT-only): op `run`
+  executes the notebook **headlessly** via `marimo export ipynb … --include-outputs` and parses the
+  per-cell outputs/errors; op `check` runs marimo's static lint (the **single-definition rule**, cycles —
+  marimo-specific issues pyrefly/ruff can't see, which marimo itself recommends agents run after edits).
+  No server.
 - **uv provisions marimo** (`uv run --with marimo --with nbformat …`); the notebook's own imports come
   from the **project's uv env**. Missing `uv` → an install hint (same require-not-ship pattern as LSP).
 - **Persistence without a server:** `mo.persistent_cache` stores results on disk (`__marimo__/cache/`),
