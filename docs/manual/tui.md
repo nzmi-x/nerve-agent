@@ -6,10 +6,14 @@
 **Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)).
 
 **How it works:**
-- OpenTUI imperative core: root column = `ScrollBox` transcript (`stickyScroll: bottom`) · a `popup`
-  `TextRenderable` (autosuggest **or** the ask picker) · a status `TextRenderable` · an `Input`.
-- **Streaming** text grows a live `TextRenderable`; reasoning dim/italic; tool results dim. Lines are
+- Paneled layout (Tokyo-Night palette): a **bordered transcript** `Box` (rounded, title " ◆ nerve ")
+  wrapping a `ScrollBox` (`stickyScroll: bottom`) · a `popup` `Box` (autosuggest **or** ask picker, with
+  per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled status bar.
+- **Assistant answers render as markdown** — a streaming `MarkdownRenderable` (`SyntaxStyle` from the
+  palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
+  `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are
   appended (`transcript.add`) and removed by id (`transcript.remove(id)`) for `/clear` & `/drop`.
+- **Status bar:** `model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a `bg` mode badge.
 - **Status line:** `model · mode · cost · context% · balance`, fed by `UsageMeter` (on `usage` events)
   + `fetchBalance` (startup / `/model` / `/balance`). See [usage](usage.md), [balance](balance.md).
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs

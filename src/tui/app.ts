@@ -1,6 +1,7 @@
-// The interactive terminal UI (OpenTUI imperative core): sticky-bottom transcript, an autosuggest
-// row, a status line (mode · model · cost · context% · balance), and an input with affordances —
-// @path files, !cmd shell, /cmd commands, plus an interactive ask_user picker. See docs/manual/tui.md.
+// The interactive terminal UI (OpenTUI imperative core). Paneled layout: a bordered transcript that
+// renders assistant output as markdown, an autosuggest/ask popup with row highlighting, a bordered
+// input, and a styled status bar (model · mode · cost · context · balance). Affordances: @file, !shell,
+// /command + an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -10,7 +11,14 @@ import {
   ScrollBoxRenderable,
   InputRenderable,
   InputRenderableEvents,
+  MarkdownRenderable,
+  SyntaxStyle,
+  RGBA,
   TextAttributes,
+  t,
+  bold,
+  fg,
+  bg,
   type KeyEvent,
 } from "@opentui/core";
 import { loop } from "../loop.ts";
@@ -19,29 +27,58 @@ import { bash } from "../tools/bash.ts";
 import { selectModel, providerFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
-import {
-  parseAffordance,
-  atSuggestions,
-  slashSuggestions,
-  parseSlash,
-  applyAtSuggestion,
-  type CommandInfo,
-} from "./affordances.ts";
+import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest } from "../tools/types.ts";
 import { Session } from "../session.ts";
 
+// Tokyo Night palette
 const FG = "#c0caf5";
+const MUTE = "#737aa2";
 const DIM = "#565f89";
-const USER = "#7aa2f7";
-const ACCENT = "#9ece6a";
-const ERR = "#f7768e";
+const BORDER = "#2f334d";
+const ACCENT = "#7aa2f7";
+const GREEN = "#9ece6a";
+const YELLOW = "#e0af68";
+const RED = "#f7768e";
+const MAGENTA = "#bb9af7";
+const CYAN = "#7dcfff";
+const ORANGE = "#ff9e64";
+const SELBG = "#283457";
+const PANEL = "#16161e";
+const DARKFG = "#1a1b26";
+const WHITE = "#ffffff";
+
+const syntaxStyle = SyntaxStyle.fromStyles({
+  default: { fg: RGBA.fromHex(FG) },
+  "markup.heading": { fg: RGBA.fromHex(ACCENT), bold: true },
+  "markup.heading.1": { fg: RGBA.fromHex(ACCENT), bold: true },
+  "markup.heading.2": { fg: RGBA.fromHex(CYAN), bold: true },
+  "markup.bold": { fg: RGBA.fromHex(YELLOW), bold: true },
+  "markup.italic": { italic: true },
+  "markup.list": { fg: RGBA.fromHex(MAGENTA) },
+  "markup.raw": { fg: RGBA.fromHex(GREEN) },
+  "markup.link": { fg: RGBA.fromHex(CYAN), underline: true },
+  "markup.quote": { fg: RGBA.fromHex(DIM), italic: true },
+  keyword: { fg: RGBA.fromHex(MAGENTA) },
+  string: { fg: RGBA.fromHex(GREEN) },
+  comment: { fg: RGBA.fromHex(DIM), italic: true },
+  function: { fg: RGBA.fromHex(ACCENT) },
+  number: { fg: RGBA.fromHex(ORANGE) },
+  boolean: { fg: RGBA.fromHex(ORANGE) },
+  type: { fg: RGBA.fromHex(CYAN) },
+  property: { fg: RGBA.fromHex(CYAN) },
+  operator: { fg: RGBA.fromHex(CYAN) },
+  punctuation: { fg: RGBA.fromHex(MUTE) },
+});
+
+type Content = string | ReturnType<typeof t>;
 
 const HELP = [
-  "commands: /help /model [id] /mode plan|yolo /clear /drop /balance /resume /quit",
-  "input:    @path (file ref) · !cmd (run shell directly) · /cmd (command)",
-  "keys:     Enter send · Tab accept suggestion · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
+  "commands  /help · /model [id] · /mode plan|yolo · /clear · /drop · /balance · /resume · /quit",
+  "input     @path file ref · !cmd run shell directly · /cmd command",
+  "keys      Enter send · Tab accept · ↑/↓ navigate · Shift+Tab mode · ESC stop · Ctrl+C quit",
 ].join("\n");
 
 export interface TuiOptions {
@@ -60,9 +97,16 @@ interface Suggestion {
   label: string;
   insert: string;
 }
+interface PopupRow {
+  content: string;
+  fg: string;
+  bg?: string;
+  bold?: boolean;
+}
 
 export async function runTui(opts: TuiOptions): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30 });
+  renderer.setBackgroundColor(DARKFG);
   const { models, cwd, system, tools, skills } = opts;
 
   let active = opts.entry;
@@ -74,72 +118,93 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let busy = false;
   let turnAbort: AbortController | null = null;
   let lineId = 0;
+  let echoGuard: string | null = null;
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
-  let echoGuard: string | null = null; // value we just set programmatically — ignore its INPUT echo once
 
   // --- layout ---------------------------------------------------------------
-  const root = new BoxRenderable(renderer, { id: "root", width: "100%", height: "100%", flexDirection: "column" });
-  const transcript = new ScrollBoxRenderable(renderer, {
-    id: "transcript",
+  const root = new BoxRenderable(renderer, { id: "root", width: "100%", height: "100%", flexDirection: "column", padding: 0 });
+  const transcriptBox = new BoxRenderable(renderer, {
+    id: "transcriptBox",
     flexGrow: 1,
     width: "100%",
-    stickyScroll: true,
-    stickyStart: "bottom",
+    border: true,
+    borderStyle: "rounded",
+    borderColor: BORDER,
+    title: " ◆ nerve ",
     paddingLeft: 1,
     paddingRight: 1,
   });
-  const popup = new TextRenderable(renderer, { id: "popup", content: "", height: 0, flexShrink: 0, fg: DIM, paddingLeft: 1 });
-  const status = new TextRenderable(renderer, { id: "status", content: "", height: 1, flexShrink: 0, bg: "#1f2335" });
-  const input = new InputRenderable(renderer, {
-    id: "input",
+  const transcript = new ScrollBoxRenderable(renderer, { id: "transcript", flexGrow: 1, width: "100%", stickyScroll: true, stickyStart: "bottom" });
+  transcriptBox.add(transcript);
+
+  const popup = new BoxRenderable(renderer, { id: "popup", flexShrink: 0, height: 0, flexDirection: "column", paddingLeft: 2, paddingRight: 1 });
+  const inputBox = new BoxRenderable(renderer, {
+    id: "inputBox",
+    flexShrink: 0,
     width: "100%",
-    placeholder: "Message · @file · !shell · /command — Enter send · Shift+Tab mode · Ctrl+C quit",
-    textColor: FG,
-    cursorColor: ACCENT,
+    border: true,
+    borderStyle: "rounded",
+    borderColor: BORDER,
+    flexDirection: "row",
+    paddingLeft: 1,
+    paddingRight: 1,
   });
-  root.add(transcript);
+  const prompt = new TextRenderable(renderer, { id: "prompt", content: "❯ ", fg: ACCENT, attributes: TextAttributes.BOLD });
+  const input = new InputRenderable(renderer, { id: "input", flexGrow: 1, placeholder: "Message · @file · !shell · /command", textColor: FG, cursorColor: ACCENT });
+  inputBox.add(prompt);
+  inputBox.add(input);
+
+  const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: PANEL });
+
+  root.add(transcriptBox);
   root.add(popup);
+  root.add(inputBox);
   root.add(status);
-  root.add(input);
   renderer.root.add(root);
   input.focus();
 
-  const lines: TextRenderable[] = [];
-  const addLine = (content: string, fg = FG, attributes = 0): TextRenderable => {
-    const line = new TextRenderable(renderer, { id: `line-${lineId++}`, content, fg, attributes });
-    transcript.add(line);
-    lines.push(line);
-    return line;
+  // --- transcript -----------------------------------------------------------
+  const lineIds: string[] = [];
+  const addText = (content: Content, fgColor = FG, attributes = 0): TextRenderable => {
+    const tr = new TextRenderable(renderer, { id: `ln-${lineId++}`, content, fg: fgColor, attributes });
+    transcript.add(tr);
+    lineIds.push(tr.id);
+    return tr;
   };
+  const addMarkdown = (): MarkdownRenderable => {
+    const md = new MarkdownRenderable(renderer, { id: `md-${lineId++}`, width: "100%", content: "", syntaxStyle, streaming: true });
+    transcript.add(md);
+    lineIds.push(md.id);
+    return md;
+  };
+  const spacer = (): void => void addText("");
   const clearTranscript = (): void => {
-    for (const l of lines) transcript.remove(l.id);
-    lines.length = 0;
+    for (const id of lineIds) transcript.remove(id);
+    lineIds.length = 0;
   };
 
-  // Single source of truth for the popup row — content AND height together, so an empty popup is
-  // exactly 0 rows and the flex column never mis-reflows the status line / input.
-  const setPopup = (content: string, fg = DIM): void => {
-    popup.content = content;
-    popup.fg = fg;
-    popup.height = content === "" ? 0 : content.split("\n").length;
+  // --- popup (autosuggest + ask picker, with row highlight) -----------------
+  const popupRows: TextRenderable[] = [];
+  const setPopup = (rows: PopupRow[]): void => {
+    for (const r of popupRows) popup.remove(r.id);
+    popupRows.length = 0;
+    rows.forEach((row, i) => {
+      const tr = new TextRenderable(renderer, { id: `pop-${i}`, content: row.content, fg: row.fg, ...(row.bg ? { bg: row.bg } : {}), attributes: row.bold ? TextAttributes.BOLD : 0 });
+      popup.add(tr);
+      popupRows.push(tr);
+    });
+    popup.height = rows.length;
   };
-
-  const setStatus = (): void => {
-    const s = meter.snapshot();
-    status.content = ` ${active.id} · ${mode === "plan" ? "PLAN" : "YOLO"} · ${formatCost(s.costUsd)} · ctx ${formatContext(s.contextTokens, active.contextWindow)} · bal ${formatBalance(balance)}${busy ? " · …" : ""}`;
-  };
-
-  // --- suggestions ----------------------------------------------------------
   const suggestOpen = (): boolean => suggest.items.length > 0;
   const clearSuggest = (): void => {
     suggest = { kind: "none", items: [], sel: 0 };
-    if (!asking) setPopup("");
+    if (!asking) setPopup([]);
   };
   const renderSuggest = (): void => {
     if (asking) return;
-    setPopup(suggest.items.map((it, i) => `${i === suggest.sel ? "▶ " : "  "}${it.label}`).join("\n"), DIM);
+    setPopup(suggest.items.map((it, i) => ({ content: it.label, fg: i === suggest.sel ? WHITE : MUTE, bg: i === suggest.sel ? SELBG : undefined, bold: i === suggest.sel })));
   };
   async function updateSuggestions(value: string): Promise<void> {
     if (asking) return;
@@ -149,7 +214,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       suggest = { kind: "at", items: paths.map((p) => ({ label: p, insert: p })), sel: 0 };
     } else if (aff.kind === "slash") {
       const cmds = slashSuggestions(aff.query, skills);
-      suggest = { kind: "slash", items: cmds.map((c) => ({ label: `/${c.name}${c.description ? `  ${c.description}` : ""}`, insert: c.name })), sel: 0 };
+      suggest = { kind: "slash", items: cmds.map((c) => ({ label: `/${c.name}${c.description ? `   ${c.description}` : ""}`, insert: c.name })), sel: 0 };
     } else {
       suggest = { kind: "none", items: [], sel: 0 };
     }
@@ -159,20 +224,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const it = suggest.items[suggest.sel];
     if (!it) return;
     const next = suggest.kind === "at" ? applyAtSuggestion(input.value, it.insert) : `/${it.insert} `;
-    echoGuard = next; // suppress the INPUT echo from this set so the popup stays closed
+    echoGuard = next;
     input.value = next;
     clearSuggest();
-    // popup closes on accept; type another char to re-suggest (e.g. to drill into the accepted dir)
   }
 
-  // --- ask_user picker (ctx.ask) -------------------------------------------
   const renderAsk = (): void => {
     if (!asking) return;
-    const rows = [`? ${asking.req.question}`];
+    const rows: PopupRow[] = [{ content: `? ${asking.req.question}`, fg: ACCENT, bold: true }];
     asking.req.options.forEach((o, i) => {
-      rows.push(`${i === asking!.sel ? "▶ " : "  "}${o.label}${o.recommended ? " (recommended)" : ""}${o.description ? ` — ${o.description}` : ""}`);
+      const sel = i === asking!.sel;
+      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${o.description}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
     });
-    setPopup(rows.join("\n"), ACCENT);
+    setPopup(rows);
   };
   function ask(req: AskRequest): Promise<string> {
     return new Promise((resolve) => {
@@ -181,6 +245,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       renderAsk();
     });
   }
+
+  // --- status ---------------------------------------------------------------
+  const setStatus = (): void => {
+    const s = meter.snapshot();
+    const badge = mode === "yolo" ? bg(GREEN)(fg(DARKFG)(" YOLO ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
+    status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? fg(YELLOW)("   ● streaming") : ""}`;
+  };
 
   // --- actions --------------------------------------------------------------
   async function refreshBalance(): Promise<void> {
@@ -196,11 +267,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function runShell(cmd: string): Promise<void> {
     const c = cmd.trim();
     if (!c) return;
-    addLine(`! ${c}`, ACCENT);
+    addText(t`${bold(fg(YELLOW)("$"))} ${c}`);
     try {
-      addLine(await bash.run({ command: c }, { cwd }), DIM); // full authority, ungated, not added to the session
+      addText(await bash.run({ command: c }, { cwd }), MUTE); // full authority, ungated, not added to the session
     } catch (e) {
-      addLine(`✗ ${e instanceof Error ? e.message : String(e)}`, ERR);
+      addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
     }
   }
 
@@ -210,12 +281,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     try {
       unlinkSync(join(".nerve", "sessions", `${old}.jsonl`));
     } catch {
-      // already gone — fine
+      /* already gone */
     }
     session = new Session({});
     meter = new UsageMeter();
     clearTranscript();
-    addLine(`dropped session ${old} · new session ${session.id}`, DIM);
+    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
     setStatus();
   }
 
@@ -223,7 +294,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const { name, args } = parseSlash(value);
     switch (name) {
       case "help":
-        addLine(HELP, DIM);
+        addText(HELP, MUTE);
         return;
       case "quit":
         return void shutdown();
@@ -237,41 +308,36 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         if (m === "plan" || m === "yolo") {
           mode = m;
           setStatus();
-          addLine(`mode → ${m.toUpperCase()}`, DIM);
-        } else addLine("usage: /mode plan|yolo", DIM);
+          addText(`mode → ${m.toUpperCase()}`, MUTE);
+        } else addText("usage: /mode plan|yolo", MUTE);
         return;
       }
       case "model": {
         const id = args[0];
         if (!id) {
-          addLine(`models: ${models.map((m) => m.id).join(", ")}`, DIM);
+          addText(`models: ${models.map((m) => m.id).join(", ")}`, MUTE);
           return;
         }
         try {
           active = selectModel(models, id);
           provider = providerFor(active);
           setStatus();
-          addLine(`model → ${active.id}`, DIM);
+          addText(`model → ${active.id}`, MUTE);
           void refreshBalance();
         } catch (e) {
-          addLine(`✗ ${e instanceof Error ? e.message : String(e)}`, ERR);
+          addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
         }
         return;
       }
       case "balance":
         await refreshBalance();
-        addLine(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? " (Gemini has no balance API)" : ""}`, DIM);
+        addText(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, MUTE);
         return;
       case "resume":
-        addLine("resume is a launch flag: bun index.ts --resume <id>|last", DIM);
+        addText("resume is a launch flag: bun index.ts --resume <id>|last", MUTE);
         return;
       default:
-        addLine(
-          skills.some((s) => s.name === name)
-            ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")`
-            : `unknown command: /${name} (try /help)`,
-          DIM,
-        );
+        addText(skills.some((s) => s.name === name) ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")` : `unknown command: /${name} (try /help)`, MUTE);
     }
   }
 
@@ -285,10 +351,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
     busy = true;
     setStatus();
-    addLine(`› ${text}`, USER, TextAttributes.BOLD);
+    spacer();
+    addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
     let reasoningLine: TextRenderable | null = null;
-    const answer = addLine("", FG);
+    const answer = addMarkdown();
     turnAbort = new AbortController();
     try {
       await loop({
@@ -300,7 +367,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         interceptors: [
           secretRedaction(),
           reasoningRouter((d) => {
-            reasoningLine ??= addLine("", DIM, TextAttributes.ITALIC);
+            reasoningLine ??= addText("✻ ", DIM, TextAttributes.ITALIC);
             reasoningLine.content += d;
           }),
           tokenTap(session),
@@ -317,11 +384,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
             setStatus();
           }
         },
-        onToolResult: (name, result) => addLine(`→ ${name}: ${firstLine(result)}`, DIM),
+        onToolResult: (name, result) => addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`),
       });
     } catch (e) {
-      addLine(`✗ ${e instanceof Error ? e.message : String(e)}`, ERR);
+      addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
     } finally {
+      answer.streaming = false;
       busy = false;
       turnAbort = null;
       setStatus();
@@ -342,7 +410,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // --- events ---------------------------------------------------------------
   input.on(InputRenderableEvents.INPUT, (value: string) => {
     if (echoGuard !== null && value === echoGuard) {
-      echoGuard = null; // this INPUT is the echo of our own set — don't re-open the popup
+      echoGuard = null;
       return;
     }
     echoGuard = null;
@@ -365,7 +433,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       } else if (key.name === "return") {
         const a = asking;
         asking = null;
-        setPopup("");
+        setPopup([]);
         a.resolve(a.req.options[a.sel]!.label);
       }
       return;
@@ -399,7 +467,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (key.name === "escape") turnAbort?.abort();
   });
 
-  addLine(`nerve · ${active.id} (${active.provider}) · ${mode === "plan" ? "PLAN" : "YOLO"} · /help for commands`, DIM);
+  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help")}`);
   setStatus();
   void refreshBalance();
 }
