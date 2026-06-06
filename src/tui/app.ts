@@ -31,7 +31,8 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
-import { listSessions, lastSessionId, SESSIONS_DIR } from "../sessions.ts";
+import { listSessions, lastSessionId } from "../sessions.ts";
+import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest } from "../tools/types.ts";
@@ -379,7 +380,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const old = session.id;
     await session.close();
     try {
-      unlinkSync(join(SESSIONS_DIR, `${old}.jsonl`));
+      unlinkSync(join(sessionsDir(cwd), `${old}.jsonl`));
     } catch {
       /* already gone */
     }
@@ -393,9 +394,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // /resume [id] — switch to an existing session (default: the most recent one that isn't this one).
   async function resumeSession(idArg?: string): Promise<void> {
     if (busy) return;
-    const id = idArg ?? lastSessionId(SESSIONS_DIR, session.id);
+    const id = idArg ?? lastSessionId(sessionsDir(cwd), session.id);
     if (!id) return void addText("no other session to resume", MUTE);
-    if (!existsSync(join(SESSIONS_DIR, `${id}.jsonl`))) return void addText(`✗ no session '${id}'`, RED);
+    if (!existsSync(join(sessionsDir(cwd), `${id}.jsonl`))) return void addText(`✗ no session '${id}'`, RED);
     await session.close();
     session = new Session({ id, resume: true });
     meter = new UsageMeter();
@@ -413,14 +414,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       if (!id) return void addText("usage: /sessions delete <id>", MUTE);
       if (id === session.id) return void addText("✗ that's the current session — use /drop", RED);
       try {
-        unlinkSync(join(SESSIONS_DIR, `${id}.jsonl`));
+        unlinkSync(join(sessionsDir(cwd), `${id}.jsonl`));
         addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
       } catch {
         addText(`✗ no session '${id}'`, RED);
       }
       return;
     }
-    const list = listSessions();
+    const list = listSessions(sessionsDir(cwd));
     if (!list.length) return void addText("no sessions yet", MUTE);
     addText(t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
     for (const s of list) {

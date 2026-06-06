@@ -1,9 +1,10 @@
 // Loads the committed model catalog (config/models.json) and resolves the active model + its
 // provider. Keys come from .env via Bun.env — never from the catalog. See docs/manual/config.md.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deepseek } from "./providers/deepseek.ts";
 import { gemini } from "./providers/gemini.ts";
+import { globalModelsPath } from "./paths.ts";
 import type { Provider } from "./providers/types.ts";
 import type { Candidate } from "./loop.ts";
 import type { Pricing } from "./usage.ts";
@@ -23,9 +24,12 @@ export interface ModelEntry {
 
 const DEFAULT_CATALOG = resolve(import.meta.dir, "../config/models.json");
 
-export function loadModels(path: string = DEFAULT_CATALOG): ModelEntry[] {
-  const data = JSON.parse(readFileSync(path, "utf8")) as { models?: ModelEntry[] };
-  if (!data.models?.length) throw new Error(`no models in ${path}`);
+/** Load the model catalog. A global `~/.nerve/models.json` overrides the bundled one when present
+ *  (D22), so the catalog can live with the user's config instead of nerve's install dir. */
+export function loadModels(path?: string): ModelEntry[] {
+  const p = path ?? (existsSync(globalModelsPath()) ? globalModelsPath() : DEFAULT_CATALOG);
+  const data = JSON.parse(readFileSync(p, "utf8")) as { models?: ModelEntry[] };
+  if (!data.models?.length) throw new Error(`no models in ${p}`);
   return data.models;
 }
 

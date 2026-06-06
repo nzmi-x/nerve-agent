@@ -18,7 +18,7 @@ hand-built and stay that way. `git init` is a prerequisite before nerve self-edi
 bun install              # deps
 bun run dev              # bun --watch index.ts — runs the TUI, restarts on change
 bun run start            # bun index.ts — one-shot run
-bun index.ts --resume last   # resume the most recent session (replays .nerve/sessions/<id>.jsonl)
+bun index.ts --resume last   # resume the most recent session (replays ~/.nerve/projects/<slug>/sessions/<id>.jsonl)
 bun run test             # bun test ./tests/ — our suite (scoped; references/ is NOT a test root)
 bun test ./tests/stream.test.ts   # run one file
 # NB: bare `bun test` scans the whole tree incl. references/ — always scope to ./tests/
@@ -41,8 +41,12 @@ Run `bun run typecheck` before declaring a change done. There is no compile/bund
 - **System prompt** is `prompts/system.md`, read fresh each turn (so it hot-swaps).
 - **Claude-compat ([D12](../docs/DECISIONS.md)):** `src/context.ts` layers `CLAUDE.md` (`~/.claude` →
   `./.claude`/`./CLAUDE.md`, resolving `@imports`) onto the system prompt, and discovers skills from
-  `~/.claude/skills` + `./.claude/skills`. nerve's own guide lives at `.claude/CLAUDE.md` (root
+  the `skillRoots` ([D22](../docs/DECISIONS.md)). nerve's own guide lives at `.claude/CLAUDE.md` (root
   `CLAUDE.md` is just an `@.claude/CLAUDE.md` import so Claude Code still loads it).
+- **State lives in `~/.nerve`, not the project ([D22](../docs/DECISIONS.md)):** sessions, plus global
+  + per-project `skills`/`commands`, live under `~/.nerve/projects/<cwd-slug>/…` (`src/paths.ts`,
+  `$NERVE_HOME` override). nerve writes nothing into the working dir. A `~/.nerve/models.json` overrides
+  the committed catalog when present.
 
 ## Runtime behavior to respect
 

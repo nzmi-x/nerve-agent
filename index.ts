@@ -2,11 +2,11 @@
 // nerve — kernel runner (headless). The interactive OpenTUI front-end lands next; for now this runs
 // one-shot prompts (`-p "…"`) or a simple stdin REPL, streaming to stdout. See docs/manual/loop.md.
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config.ts";
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
+import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
@@ -94,6 +94,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
 
 // --- boot -------------------------------------------------------------------
 preflight();
+ensureLayout(); // create ~/.nerve/{skills,commands} + this workspace's dirs (D22)
 const models = loadModels();
 const entry = selectModel(models, arg("--model"));
 let provider: Provider;
@@ -128,8 +129,8 @@ if (prompt) {
   const { discoverSkills } = await import("./src/tui/affordances.ts");
   const { discoverCommands } = await import("./src/commands.ts");
   const cwd = process.cwd();
-  const skills = await discoverSkills([join(homedir(), ".claude/skills"), join(cwd, ".claude/skills")]);
-  const commands = await discoverCommands([join(homedir(), ".claude/commands"), join(cwd, ".claude/commands"), join(cwd, ".nerve/commands")]);
+  const skills = await discoverSkills(skillRoots(cwd));
+  const commands = await discoverCommands(commandRoots(cwd));
   await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt() });
 } else {
   // piped stdin: a simple line REPL

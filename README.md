@@ -31,7 +31,7 @@ If an abstraction doesn't pay rent today, it isn't here. The *why* of every choi
 - **LSP code intelligence:** a raw, zero-dep Language Server client. `edit`/`write`/`read` append
   diagnostics so the agent self-corrects, and an `lsp` tool gives it definition/references/hover/
   symbols (read-only, so it works in PLAN mode). Seeded for TypeScript. *(Phase 2.)*
-- **Claude-compatible:** loads `CLAUDE.md` (layered from `~/.claude` + workspace `./.claude` + root)
+- **Claude-compatible:** loads `CLAUDE.md` (layered from `~/.claude` + project `./.claude` + root)
   into the system prompt, and discovers skills from `~/.claude/skills` + `./.claude/skills` — so your
   existing Claude ecosystem (like the bundled `opentui` skill) just works.
 - **Self-documenting:** a `manual` tool serves nerve's own operator manual (`docs/manual/`) — the
@@ -112,8 +112,12 @@ nerve/
 │   └── tui/
 │       └── app.ts       # OpenTUI views: transcript, streaming md/diff, reasoning fold, status line
 ├── tests/               # bun:test, colocated by concern
-└── .nerve/sessions/     # <id>.jsonl transcripts (gitignored) — resume + telemetry sink
+└── src/paths.ts         # global-state layout (D22) — nerve writes NOTHING into the project dir
 ```
+
+State lives under **`~/.nerve`** (not the project), namespaced like `~/.claude/projects` (D22):
+`~/.nerve/projects/<cwd with / → ->/sessions/<id>.jsonl` for transcripts, plus global + per-project
+`skills/` and `commands/`. So contribution repos stay clean. Override the root with `$NERVE_HOME`.
 
 No barrels, no `utils/` junk drawer, no path aliases — relative imports keep the graph legible.
 

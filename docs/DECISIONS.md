@@ -111,7 +111,8 @@ top-level side effects that can't run twice). The system prompt is likewise a fi
 turn, so it's hot-swappable too.
 
 ## D8 — Persistence: append-only JSONL per session, resume by replay
-**Decision.** Each session is a file **`.nerve/sessions/<id>.jsonl`** with **typed lines**, appended
+**Decision.** Each session is a file **`<sessions-dir>/<id>.jsonl`** (the dir is per-project under
+`~/.nerve`, see [D22](#d22--all-state-lives-under-nerve-namespaced-per-project-not-in-the-repo); originally `./.nerve/sessions`) with **typed lines**, appended
 as it happens: `{"t":"msg",...}` canonical messages (user/assistant/tool — including the stored
 reasoning artifact, see [§0 cross-cutting rule](providers.md)) and optional `{"t":"delta",...}` raw
 deltas from the token-tap interceptor. **Resume (`--resume` / last) replays only the `msg` lines**;
@@ -126,7 +127,7 @@ needs, a schema to own).
 **Decision.** The interceptor pipeline is **synchronous, per-delta**; each interceptor can
 **observe / rewrite / drop** an event or call `ctl.abort()` / `ctl.emit()`. Phase 1 ships **four**
 concrete interceptors so the seam has real users:
-1. **Token-tap → JSONL** — tees every `text`/`reasoning` delta + `usage` to the `.nerve/sessions`
+1. **Token-tap → JSONL** — tees every `text`/`reasoning` delta + `usage` to the session's JSONL
    sink as `delta` lines (telemetry/replay-debug; the canonical `msg` lines come from the session
    itself — [D8](#d8--persistence-append-only-jsonl-per-session-resume-by-replay)).
 2. **Stop-guard** — watches `ctl.text`; `ctl.abort()`s the in-flight fetch the instant a
@@ -353,7 +354,7 @@ the Gemini provider exists.
 ## D16 — Markdown slash commands (`$ARGUMENTS` templates), Claude/nerve compatible
 **Decision.** `/<name>` resolves a **markdown command file** the same way skills are discovered
 ([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)): scan
-`~/.claude/commands/*.md` + `./.claude/commands/*.md` (and nerve's own `.nerve/commands/`), parse
+the `commandRoots` dirs (`~/.nerve` + `.claude` project/user, [D22](#d22--all-state-lives-under-nerve-namespaced-per-project-not-in-the-repo)) for `*.md`, parse
 optional `name`/`description` frontmatter, and on invocation **expand the body into a prompt** with
 substitution: `$1 $2 …` positional, `$@`/`$ARGUMENTS` for all args, the rest verbatim. The expanded
 text is submitted as if the user typed it. Discovery + expansion are **pure** (`src/commands.ts`,
@@ -460,6 +461,40 @@ so they aren't re-proposed without new information:
   Not deferred — **out of scope by design.**
 **Why.** Recording the *no*s (with reasons) is as load-bearing as the *yes*es — it stops a future
 session (human or nerve) from re-litigating settled scope.
+
+## D22 — All state lives under `~/.nerve`, namespaced per project (not in the repo)
+**Decision.** nerve writes **nothing** into the working directory. Everything lives under a global
+**`~/.nerve`** (override `$NERVE_HOME`), namespaced by project — mirroring `~/.claude/projects`:
+```
+~/.nerve
+├── skills/ · commands/ · models.json     # global (models.json overrides the bundled catalog if present)
+└── projects/<slug>/
+    ├── sessions/   # this project's transcripts (was ./.nerve/sessions)
+    ├── skills/     # project-level skills
+    └── commands/   # project-level slash commands
+```
+- **Project `<slug>` = the absolute cwd with `/` → `-`** (e.g. `/home/naz/Documents/nerve` →
+  `-home-naz-Documents-nerve`) — **collision-free** and the **same encoding `~/.claude/projects` uses**.
+  (We also use Claude's term **`projects/`**, not `workspaces/`, for consistency.)
+- **Sessions** moved out of `./.nerve/sessions` to `~/.nerve/projects/<slug>/sessions`
+  ([D8](#d8--persistence-append-only-jsonl-per-session-resume-by-replay) unchanged otherwise).
+- **Skill/command discovery** roots (most-specific first, dedup first-wins): project nerve →
+  project `.claude` → global nerve → user `.claude` ([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)/[D16](#d16--markdown-slash-commands-arguments-templates-claudenerve-compatible)).
+- **Config:** the committed `config/models.json` stays the default (D5), but a `~/.nerve/models.json`
+  **overrides** it when present, so config can live with the user instead of nerve's install dir.
+- Centralized in **`src/paths.ts`** (`nerveHome`/`projectSlug`/`projectDir`/`sessionsDir`/`skillRoots`/
+  `commandRoots`/`ensureLayout`); `ensureLayout()` runs at boot to create the dirs.
+**Why.** The user does **contribution work** across many repos and doesn't want a `.nerve/` folder
+nobody else uses showing up in each one. A global home keeps repos clean; the encoded-path slug keeps
+two same-named repos (`cli`, `docs`, …) from silently sharing one session history, and matches the
+Claude ecosystem nerve already mirrors ([D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)) — including its `projects/` naming.
+**Rejected.** In-repo `./.nerve` (the pollution being fixed); a **plain-basename** slug (collides
+across same-named repos → merged histories); **basename+hash** (readable + unique, but the user chose
+encoded-path for Claude-compat); `workspaces/` as the dir name (renamed to `projects/` to match Claude);
+moving the *committed* model catalog out of the repo (loses the schema-backed IntelliSense of
+[D5](#d5--model-selection-keys-in-env-models-in-a-committed-catalog) — kept as default, global only overrides).
+**Phase.** Built now (Phase 1.5). Old `./.nerve/sessions` transcripts are **not** auto-migrated (copy
+them under `~/.nerve/projects/<slug>/sessions` if you want them resumable).
 
 ## D21 — Default communication style: caveman, in the system prompt (not a skill)
 **Decision.** nerve's **default output style is "caveman"** — terse, fragments, drop

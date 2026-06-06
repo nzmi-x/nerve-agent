@@ -21,8 +21,9 @@
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
 - **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /reload /sessions /resume [id] /drop /balance /quit` + skill listing
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
-  `<name>.md` under `~/.claude/commands`, `./.claude/commands`, or `./.nerve/commands` expands its body
-  (`$1`/`$@`/`$ARGUMENTS` substitution) and submits it as a prompt. A built-in name always wins.
+  `<name>.md` under any `commandRoots` dir (`~/.nerve/projects/<slug>/commands` · `./.claude/commands` ·
+  `~/.nerve/commands` · `~/.claude/commands`, D22) expands its body (`$1`/`$@`/`$ARGUMENTS` substitution)
+  and submits it as a prompt. A built-in name always wins.
 - **`ask_user`:** the loop's `ctx.ask` opens an interactive picker (↑/↓ + Enter) in the popup and
   blocks the turn until you choose; the recommended option is preselected.
 - **Sessions:** `/resume [id]` closes the current session and reloads an existing one (default = most
@@ -43,8 +44,8 @@
 - The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;
   `app.ts` only renders + routes keys. For the OpenTUI API, `manual("opentui")`.
 - New built-in `/command` → add to `BUILTIN_COMMANDS` (affordances) + a `case` in `runCommand`.
-- New *file* command → drop a `<name>.md` in `./.nerve/commands` (or `./.claude/commands`); no code
-  change. Expansion/discovery live in `src/commands.ts` (tested).
+- New *file* command → drop a `<name>.md` in any `commandRoots` dir (e.g. `~/.nerve/commands` or
+  `./.claude/commands`, D22); no code change. Expansion/discovery live in `src/commands.ts` (tested).
 
 **Gotchas:**
 - Interactive rendering isn't unit-testable — verify in a real terminal (`bun index.ts`). Watch:

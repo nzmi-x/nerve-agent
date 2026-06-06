@@ -4,6 +4,7 @@
 import { createWriteStream, existsSync, mkdirSync, readFileSync, type WriteStream } from "node:fs";
 import { join } from "node:path";
 import { summaryMessage } from "./compaction.ts";
+import { sessionsDir } from "./paths.ts";
 import type { Message, StreamEvent, ToolCall } from "./providers/types.ts";
 
 export interface SessionInit {
@@ -36,7 +37,7 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.id = init.id ?? new Date().toISOString().replace(/[:.]/g, "-");
-    const dir = init.dir ?? join(".nerve", "sessions");
+    const dir = init.dir ?? sessionsDir(); // ~/.nerve/projects/<slug>/sessions (D22)
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `${this.id}.jsonl`);
     if (init.resume && existsSync(path)) {

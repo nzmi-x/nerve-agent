@@ -13,7 +13,7 @@ assistant turn and persists the transcript as typed-line JSONL.
 - `commitAssistant()` finalizes the buffer into an assistant `Message` — **including the reasoning
   artifact** (`reasoning`, and each tool call's `signature`) needed to replay to the providers
   ([providers.md §0](../providers.md)) — appends it, persists a `msg` line, and resets the buffer.
-- Persistence is **typed JSONL** at `.nerve/sessions/<id>.jsonl`: `{"t":"msg",…}` canonical messages,
+- Persistence is **typed JSONL** at `~/.nerve/projects/<slug>/sessions/<id>.jsonl`: `{"t":"msg",…}` canonical messages,
   `{"t":"delta",…}` token-tap telemetry, and `{"t":"compaction",summary,firstKept}` markers ([D17](../DECISIONS.md)).
   `tap(ev)` writes delta lines; `loadSession()` reads back the `msg` lines (deltas ignored) and applies
   the **latest** compaction marker — `messages = [summary, …allMsgs.slice(firstKept)]`.

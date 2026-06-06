@@ -1,23 +1,24 @@
 # skills
 
-**Status:** spec (code lands in Phase 2)
-**What:** Claude-compatible skills — discover capabilities from `~/.claude/skills` and
-`./.claude/skills` and inject one on demand.
-**Code:** `src/context.ts` (discovery + layering; shared with CLAUDE.md loading)
+**Status:** discovery/listing built (Phase 1.5); invocation lands in Phase 2.
+**What:** Claude-compatible skills — discover capabilities from the `skillRoots` and inject one on demand.
+**Code:** `src/paths.ts` (`skillRoots`) + `src/tui/affordances.ts` (`discoverSkills`, frontmatter parse).
 
 **How it works:**
 - A skill is a folder with a `SKILL.md` whose YAML frontmatter has `name` + `description`.
-- On startup nerve discovers skills from `~/.claude/skills/*/` (user) and `./.claude/skills/*/`
-  (project) and keeps only each skill's **name + description** in context (progressive disclosure).
-- **Invoking** a skill injects the full `SKILL.md` body (and referenced files) for that turn.
-- Discovery is a **pure function of the filesystem**, so it hot-swaps with `/reload`.
+- On startup nerve discovers skills from the `skillRoots` ([D22](../DECISIONS.md), most-specific first,
+  dedup first-wins): `~/.nerve/projects/<slug>/skills` → `./.claude/skills` → `~/.nerve/skills` →
+  `~/.claude/skills`. Only each skill's **name + description** sit in context (progressive disclosure).
+- **Invoking** a skill injects the full `SKILL.md` body (and referenced files) for that turn (Phase 2).
+- Discovery is a **pure function of the filesystem**.
 
 **How to change it:**
-- Add/remove a discovery root → edit the roots list in `src/context.ts`.
-- Change what frontmatter is parsed → the skill-metadata parser in `src/context.ts`. Keep it to the
-  **minimal subset** (`name`, `description`); advanced Claude frontmatter (`allowed-tools`, model
-  pins) is deliberately ignored until a real need appears.
-- A new skill needs **no code** — drop a folder with a `SKILL.md` under `.claude/skills/`.
+- Add/remove a discovery root → edit `skillRoots` in `src/paths.ts`.
+- Change what frontmatter is parsed → the parser in `affordances.ts`. Keep it to the **minimal subset**
+  (`name`, `description`); advanced Claude frontmatter (`allowed-tools`, model pins) is deliberately
+  ignored until a real need appears.
+- A new skill needs **no code** — drop a folder with a `SKILL.md` under any skill root (e.g.
+  `~/.nerve/skills` for global, or `~/.nerve/projects/<slug>/skills` for this project).
 
 **Gotchas:**
 - The bundled `opentui` skill is **not** loaded as a user-skill — it's reached through the `manual`

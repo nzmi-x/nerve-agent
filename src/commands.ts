@@ -1,6 +1,6 @@
-// Markdown slash commands (D16). A `/<name>` can resolve to a `<name>.md` file under
-// `~/.claude/commands`, `./.claude/commands`, or `./.nerve/commands` (Claude-compatible, like skills
-// in D12). On invocation the body is expanded into a prompt with `$1 $2 …` / `$@` / `$ARGUMENTS`
+// Markdown slash commands (D16). A `/<name>` resolves to a `<name>.md` file under any command root
+// (`commandRoots` in paths.ts: ~/.nerve + ./.claude + ~/.claude, D22). On invocation the body is
+// expanded into a prompt with `$1 $2 …` / `$@` / `$ARGUMENTS`
 // substitution and submitted as if typed. Discovery + expansion are pure/fs-only so they're tested
 // here, away from the TUI. A built-in command of the same name always wins (handled by the caller).
 import { readdir } from "node:fs/promises";

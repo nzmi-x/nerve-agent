@@ -1,10 +1,19 @@
 import { test, expect } from "bun:test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { loadModels, selectModel, providerFor } from "../src/config.ts";
 
-test("loadModels: reads the committed catalog; default is deepseek-v4-flash", () => {
-  const models = loadModels();
-  expect(models.length).toBeGreaterThanOrEqual(2);
-  expect(selectModel(models).id).toBe("deepseek-v4-flash");
+test("loadModels: bundled catalog (no global override); default is deepseek-v4-flash", () => {
+  const saved = Bun.env.NERVE_HOME;
+  Bun.env.NERVE_HOME = join(tmpdir(), "nerve-no-global-config"); // a home with no models.json → bundled
+  try {
+    const models = loadModels();
+    expect(models.length).toBeGreaterThanOrEqual(2);
+    expect(selectModel(models).id).toBe("deepseek-v4-flash");
+  } finally {
+    if (saved === undefined) delete Bun.env.NERVE_HOME;
+    else Bun.env.NERVE_HOME = saved;
+  }
 });
 
 test("selectModel: by id, default fallback, and unknown throws", () => {

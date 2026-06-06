@@ -1,9 +1,8 @@
 // Session-file discovery for `--resume`, `/resume`, and `/sessions`. The transcript files are the
-// source of truth (D8), so "list/last" is just reading `.nerve/sessions/*.jsonl`.
+// source of truth (D8), so "list/last" is just reading the project's sessions dir (D22).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-
-export const SESSIONS_DIR = join(".nerve", "sessions");
+import { sessionsDir } from "./paths.ts";
 
 export interface SessionInfo {
   id: string;
@@ -14,7 +13,7 @@ export interface SessionInfo {
 }
 
 /** Full listing (reads each file) — newest first. For the interactive `/sessions` command. */
-export function listSessions(dir: string = SESSIONS_DIR): SessionInfo[] {
+export function listSessions(dir: string = sessionsDir()): SessionInfo[] {
   if (!existsSync(dir)) return [];
   const out: SessionInfo[] = [];
   for (const f of readdirSync(dir)) {
@@ -40,7 +39,7 @@ export function listSessions(dir: string = SESSIONS_DIR): SessionInfo[] {
 }
 
 /** The most recent session id by mtime (stat-only, no content read), optionally excluding one id. */
-export function lastSessionId(dir: string = SESSIONS_DIR, exclude?: string): string | undefined {
+export function lastSessionId(dir: string = sessionsDir(), exclude?: string): string | undefined {
   if (!existsSync(dir)) return undefined;
   let best: { id: string; mtimeMs: number } | undefined;
   for (const f of readdirSync(dir)) {
