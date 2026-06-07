@@ -60,6 +60,7 @@ export class Lsp {
   private readonly init = new Map<string, Promise<LspClient | null>>(); // id → spawn+init (null if missing/failed)
   private readonly clients = new Map<string, LspClient>();
   private readonly reported = new Set<string>(); // ids whose "missing" hint was already shown
+  private readonly state = new Map<string, "spawning" | "running" | "failed">(); // for the TUI's LSP panel
 
   constructor(
     private readonly cwd: string,
@@ -77,20 +78,31 @@ export class Lsp {
   private ensure(cfg: ServerCfg): Promise<LspClient | null> {
     let p = this.init.get(cfg.id);
     if (p) return p;
+    this.state.set(cfg.id, "spawning");
     p = (async () => {
-      if (!Bun.which(cfg.command)) return null;
+      if (!Bun.which(cfg.command)) {
+        this.state.set(cfg.id, "failed");
+        return null;
+      }
       const client = new LspClient(cfg.id, cfg.command, cfg.args ?? [], this.cwd, cfg.env);
       try {
         await client.initialize(uriOf(findRoot(this.cwd, cfg.rootMarkers ?? [".git"])));
         this.clients.set(cfg.id, client);
+        this.state.set(cfg.id, "running");
         return client;
       } catch {
         await client.stop().catch(() => {});
+        this.state.set(cfg.id, "failed");
         return null;
       }
     })();
     this.init.set(cfg.id, p);
     return p;
+  }
+
+  /** Spawn-attempted servers + their state — drives the TUI's LSP panel (D29). */
+  serverStatus(): { id: string; state: "spawning" | "running" | "failed" }[] {
+    return [...this.state].map(([id, state]) => ({ id, state }));
   }
 
   /** One-time install hints for a path's missing servers (chaining the package manager if it's missing too). */

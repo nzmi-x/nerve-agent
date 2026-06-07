@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { langForFile, activePacks, langSkills, defaultSkills, activeSkillNames, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
+import { langForFile, activePacks, langSkills, defaultSkills, activeSkillNames, checkSummary, triagePrompt, runHooks, LANGPACKS, type LangPack } from "../src/langpack.ts";
 
 test("triagePrompt: presents the triage buckets + includes the check summaries", () => {
   const p = triagePrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
@@ -46,6 +46,16 @@ test("defaultSkills: git-commit is always-on (loaded regardless of language), fr
   expect(text).toContain("Conventional Commit");
   expect(text).toContain("feat");
   expect(text).not.toContain("name: git-commit"); // YAML frontmatter removed
+});
+
+test("runHooks: onStep fires start + finalizer per command, with the command name (D29 tools panel)", async () => {
+  const steps: string[] = [];
+  const pack: LangPack = { id: "x", extensions: [".x"], skillFiles: [], fixers: [["true"]], checkers: [], installs: {} };
+  await runHooks(pack, ["/tmp/f.x"], "/tmp", (name) => {
+    steps.push(`start:${name}`);
+    return (ok) => steps.push(`done:${name}:${ok}`);
+  });
+  expect(steps).toEqual(["start:true", "done:true:true"]); // `true` runs (exists on PATH), fixers report ok
 });
 
 test("checkSummary: clean detection, noise filtered, issues passed through", () => {

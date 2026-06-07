@@ -673,12 +673,15 @@ methods (read-only for now). **Refine later:** swap the regex converter for Bun'
 holding the existing stack (transcript · todo panel · popup · input · status bar) plus a fixed-width
 (**34-col**) **`sidebar`** beside it with stacked bordered panels, each given a **distinct accent border**
 (the box title is drawn in the border colour — OpenTUI has no separate title colour — so this is what makes
-the titles legible + tells the panels apart: session=cyan, skills=magenta, tools=green, subagents=yellow,
-files=orange; transcript box=accent). **session** (model · mode badge · cost · ctx · balance — the *session
-title* moved to the transcript box header, `nerve` until auto-titled), **skills** (the skills *loaded into context now*:
-the always-on defaults + active language packs, `activeSkillNames`), **tools** (the main agent's tool
-calls this session + status — `●` running · `✓` ok · `✗` error, fed by the loop's `onToolStart`/
-`onToolResult`), **subagents** (this session's `task` runs + status `●`/`✓`/`✗`, [D6](#d6--subagents-a-read-only-task-tool-over-the-re-entrant-loop)), and **files**
+the titles legible + tells the panels apart: session=cyan, skills=magenta, lsp=accent, tools=green,
+subagents=yellow, files=orange; transcript box=accent). **session** (model · mode badge · cost · ctx ·
+balance — the *session title* moved to the transcript box header, `nerve` until auto-titled), **skills**
+(the skills *loaded into context now*: the always-on defaults + active language packs, `activeSkillNames`),
+**lsp** (the spawn-attempted language servers + state — `●` running · `◌` spawning · `✗` failed/missing,
+from `Lsp.serverStatus()`, D10), **tools** (the main agent's tool calls this session + status — `●`
+running · `✓` ok · `✗` error, fed by the loop's `onToolStart`/`onToolResult`, **plus the post-edit hooks**
+— ruff/prettier/pyrefly — surfaced via `runHooks`'s `onStep` callback as they run), **subagents** (this
+session's `task` runs + status `●`/`✓`/`✗`, [D6](#d6--subagents-a-read-only-task-tool-over-the-re-entrant-loop)), and **files**
 (the session's touched files, most-recent first; `✎` = written/edited, `·` = read-only — `flexGrow` fills
 the remainder). Each compact panel keeps a **`(none …)` placeholder row** when empty so it never collapses
 to a thin border; the files pool's height cap subtracts the others so nothing overflows. The sidebar **collapses on `Ctrl+B`** and

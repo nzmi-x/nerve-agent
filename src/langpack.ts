@@ -152,13 +152,25 @@ export function checkSummary(tool: string, out: string): string {
 }
 
 /** Run a pack's post-edit hooks on `files`: fixers edit in place, then checkers report. `issues` is
- *  true when a checker found something — the surface uses it to auto-continue the agent (D24). */
-export async function runHooks(pack: LangPack, files: string[], cwd: string): Promise<{ summary: string; issues: boolean }> {
+ *  true when a checker found something — the surface uses it to auto-continue the agent (D24). `onStep`
+ *  is invoked before each command (with its display name) and returns a finalizer (`ok`) — the TUI shows
+ *  each running hook in its tools panel. */
+export async function runHooks(
+  pack: LangPack,
+  files: string[],
+  cwd: string,
+  onStep?: (name: string) => (ok: boolean) => void,
+): Promise<{ summary: string; issues: boolean }> {
   if (!files.length) return { summary: "", issues: false };
   const missing = new Set<string>();
   for (const cmd of pack.fixers) {
-    if (!Bun.which(cmd[0]!)) missing.add(cmd[0]!);
-    else await sh([...cmd, ...files], cwd);
+    if (!Bun.which(cmd[0]!)) {
+      missing.add(cmd[0]!);
+      continue;
+    }
+    const done = onStep?.(cmd.join(" "));
+    await sh([...cmd, ...files], cwd);
+    done?.(true); // a fixer just runs (edits in place) — no pass/fail to report
   }
   const reports: string[] = [];
   let issues = false;
@@ -167,7 +179,9 @@ export async function runHooks(pack: LangPack, files: string[], cwd: string): Pr
       missing.add(cmd[0]!);
       continue;
     }
+    const done = onStep?.(cmd.join(" "));
     const r = checkSummary(cmd[0]!, await sh([...cmd, ...files], cwd));
+    done?.(r.endsWith(": clean")); // ✓ clean, ✗ if it found issues
     reports.push(r);
     if (!r.endsWith(": clean")) issues = true;
   }

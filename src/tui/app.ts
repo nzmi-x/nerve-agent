@@ -276,17 +276,20 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
   const sessionPanel = mkPanel("sessionPanel", " session ", () => CYAN);
   const skillsPanel = mkPanel("skillsPanel", " skills ", () => MAGENTA);
+  const lspPanel = mkPanel("lspPanel", " lsp ", () => ACCENT);
   const toolsPanel = mkPanel("toolsPanel", " tools ", () => GREEN);
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => YELLOW);
   const filesPanel = mkPanel("filesPanel", " files ", () => ORANGE, true);
-  for (const p of [sessionPanel, skillsPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
+  for (const p of [sessionPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
+  const LSP_ROWS = 5;
   const TOOL_ROWS = 6;
   const SUB_ROWS = 6;
   const FILE_ROWS = 40;
   const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
   const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
+  const lspRows = mkRows(lspPanel, LSP_ROWS, "lsp", 0);
   const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
   const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
   const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
@@ -315,6 +318,25 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       }
     }
     skillsPanel.height = skills.length + 2;
+
+    // lsp panel: spawn-attempted language servers + state (● running · ◌ spawning · ✗ failed/missing).
+    const lspServers = (opts.lsp?.serverStatus() ?? []).slice(0, LSP_ROWS);
+    for (let i = 0; i < lspRows.length; i++) {
+      const tr = lspRows[i]!;
+      if (i < lspServers.length) {
+        const ls = lspServers[i]!;
+        const icon = ls.state === "running" ? fg(GREEN)("●") : ls.state === "spawning" ? fg(YELLOW)("◌") : fg(RED)("✗");
+        tr.content = t`${icon} ${fg(FG)(trunc(ls.id, W - 2))}`;
+        tr.height = 1;
+      } else if (i === 0) {
+        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.height = 1;
+      } else {
+        tr.content = "";
+        tr.height = 0;
+      }
+    }
+    lspPanel.height = Math.max(1, lspServers.length) + 2;
 
     // tools panel: the main agent's tool calls this session + status (● running · ✓ ok · ✗ error).
     const toolWin = toolCalls.slice(-TOOL_ROWS);
@@ -356,7 +378,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
     // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
     const files = [...langTouched].reverse();
-    const usedAbove = sessionPanel.height + (skills.length + 2) + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
+    const usedAbove = sessionPanel.height + (skills.length + 2) + lspPanel.height + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
     const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
@@ -453,6 +475,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     inputBox.borderColor = BORDER;
     sessionPanel.borderColor = CYAN;
     skillsPanel.borderColor = MAGENTA;
+    lspPanel.borderColor = ACCENT;
     toolsPanel.borderColor = GREEN;
     subagentsPanel.borderColor = YELLOW;
     filesPanel.borderColor = ORANGE;
@@ -1009,7 +1032,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     for (const pack of activePacks(edited)) {
       const files = [...edited].filter((f) => langForFile(f) === pack);
       const note = addText(() => t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
-      const res = await runHooks(pack, files, cwd);
+      // surface each hook (ruff format, prettier --write, pyrefly check, …) in the tools panel as it runs
+      const res = await runHooks(pack, files, cwd, (name) => {
+        const id = `hook-${lineId++}`;
+        toolCalls.push({ id, name, status: "running" });
+        renderSidebar();
+        return (ok) => {
+          const e = toolCalls.find((c) => c.id === id);
+          if (e) e.status = ok ? "ok" : "err";
+          renderSidebar();
+        };
+      });
       if (res.summary) setText(note, () => t`${fg(MUTE)(res.summary)}`);
       if (res.summary) summaries.push(res.summary);
       issues ||= res.issues;

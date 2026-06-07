@@ -18,7 +18,8 @@ missing-server hint). vtsls path verified for the missing case — `bun install 
 - **`manager.ts`** (`Lsp`): lazy-spawns the servers for a file's extension (root via `rootMarkers`
   walk-up), aggregates diagnostics from all (tagged by server id), and routes a query to the **first
   server that advertises the capability** (so ruff — no `definitionProvider` — is skipped for queries
-  but still contributes diagnostics). `diagnostics(path, text, wait)` settles `SETTLE_MS` (write/edit)
+  but still contributes diagnostics). A `state` map (`spawning`/`running`/`failed`) drives
+  `serverStatus()`, which feeds the TUI's **lsp panel** ([D29](../DECISIONS.md)). `diagnostics(path, text, wait)` settles `SETTLE_MS` (write/edit)
   or returns cached (read). A missing binary → a one-time `install` hint, never a crash.
 - **Seam 1 — diagnostics:** `read`/`write`/`edit` call `ctx.lsp.diagnostics(...)` and append the block
   (`server L:C severity: message [code]`). `read` passes `wait:false` (prime + report cached, no latency).

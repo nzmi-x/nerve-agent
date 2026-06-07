@@ -20,9 +20,11 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**
-  (the title rides on the border colour — session=cyan, skills=magenta, tools=green, subagents=yellow,
-  files=orange; the transcript box is accent-blue). **session** (model · mode badge · cost · ctx · balance —
-  the *session title* lives in the transcript box header, not here), **skills** (the skills *loaded into context now* —
+  (the title rides on the border colour — session=cyan, skills=magenta, lsp=accent, tools=green,
+  subagents=yellow, files=orange; the transcript box is accent-blue). **session** (model · mode badge ·
+  cost · ctx · balance — the *session title* lives in the transcript box header, not here), **lsp** (spawned
+  language servers + state `●`/`◌`/`✗`, from `Lsp.serverStatus()`), **tools** also shows the **post-edit
+  hooks** (ruff/prettier/…) as they run, **skills** (the skills *loaded into context now* —
   always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
   this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
   session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and **files** (touched files,

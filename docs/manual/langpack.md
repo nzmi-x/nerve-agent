@@ -23,7 +23,9 @@ native, [D24](../DECISIONS.md).
 - **Post-edit hooks** (`runHooks`): after an **EDIT-mode** turn that edited files of the pack, nerve runs
   the **fixers** (edit in place) then the **checkers** (report) on just those files, and prints a
   `⚙ post-edit hooks (<lang>)` summary. Python: `pyrefly infer` → `ruff check --select I --fix` →
-  `ruff check --fix` → `ruff format`, then `pyrefly check` + `ruff check`.
+  `ruff check --fix` → `ruff format`, then `pyrefly check` + `ruff check`. An optional `onStep(name)`
+  callback fires before each command (returning an `ok` finalizer) — the TUI uses it to show each hook
+  (e.g. `ruff format`, `prettier --write`) in its **tools panel** as it runs ([D29](../DECISIONS.md)).
 - **Triage loop** (D24): if the checkers still report issues, nerve hands the summary back
   (`triagePrompt`) and the **agent triages** — fix critical/quick now, defer non-critical. **No retry
   cap**: deferring means the agent doesn't edit → no hooks → the loop stops; the only safety is a
