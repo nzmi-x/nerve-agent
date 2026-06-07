@@ -786,7 +786,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/sessions", "browse sessions — ↑/↓ · Enter resume · d delete");
     cmd("/resume", "resume the last session");
     cmd("/model [id]", "switch model — a picker if no id");
-    cmd("/mode plan|edit", "set the permission mode");
+    cmd("/mode", "toggle PLAN ↔ EDIT");
     cmd("/compact [focus]", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
     cmd("/reload", "hot-reload tools + interceptors");
@@ -838,14 +838,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return void reload();
       case "drop":
         return void drop();
-      case "mode": {
-        const m = args[0];
-        if (m === "plan" || m === "edit") {
-          mode = m;
-          setStatus(); // badge is the indicator
-        } else addPlain("usage: /mode plan|edit", () => MUTE);
+      case "mode":
+        toggleMode(); // just flip PLAN ↔ EDIT — no need to name the target (badge is the indicator)
         return;
-      }
       case "model": {
         const apply = (entry: ModelEntry): void => {
           try {

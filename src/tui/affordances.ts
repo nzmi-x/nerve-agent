@@ -24,7 +24,7 @@ export interface Skill extends CommandInfo {
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
   { name: "model", description: "Switch model — picker, or /model <id>" },
-  { name: "mode", description: "Set mode — /mode plan|edit" },
+  { name: "mode", description: "Toggle PLAN ↔ EDIT" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "compact", description: "Summarize old turns to free up context — /compact [focus]" },
   { name: "reload", description: "Hot-swap tools + interceptors from disk (Ctrl+R)" },

@@ -43,7 +43,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /reload /sessions /resume /drop /balance /quit`
+- **Commands:** `/help /model [id] /mode /clear /compact [focus] /reload /sessions /resume /drop /balance /quit`
   (`/help` is **color-coded**; commands that took a parameter are now **interactive pickers** — see below)
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
   `<name>.md` under any `commandRoots` dir (`~/.nerve/projects/<slug>/commands` · `./.claude/commands` ·
