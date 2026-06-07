@@ -32,6 +32,7 @@ import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
+import { firstLine, trunc, rel } from "./format.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
@@ -1299,21 +1300,4 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (sidebar.width > 0) sessionRows[5]!.content = t`${activityChunk()}`;
     else setStatus();
   }, 90);
-}
-
-function firstLine(s: string): string {
-  const l = s.split("\n")[0] ?? "";
-  return l.length > 120 ? `${l.slice(0, 117)}…` : l;
-}
-
-function trunc(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
-}
-
-function rel(ms: number): string {
-  const s = Math.max(0, Date.now() - ms) / 1000;
-  if (s < 60) return `${Math.floor(s)}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
 }
