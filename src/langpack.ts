@@ -3,6 +3,7 @@
 // so the agent doesn't call them by hand). Loaded when a file of the language is touched — i.e. the
 // same trigger as the LSP servers, but independent of them. Python ships first. See docs/manual/langpack.md.
 import { join, resolve } from "node:path";
+import { installHint } from "./toolchain.ts";
 
 export interface LangPack {
   id: string;
@@ -13,6 +14,8 @@ export interface LangPack {
   fixers: string[][];
   /** Commands run after the fixers — report-only (file paths appended). */
   checkers: string[][];
+  /** command name → how to install it (shown, with package-manager chaining, if it's missing). */
+  installs: Record<string, string>;
 }
 
 export const LANGPACKS: LangPack[] = [
@@ -30,6 +33,15 @@ export const LANGPACKS: LangPack[] = [
       ["pyrefly", "check"], // type errors
       ["ruff", "check"], // remaining lint
     ],
+    installs: { pyrefly: "uv tool install pyrefly", ruff: "uv tool install ruff" },
+  },
+  {
+    id: "typescript",
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+    skillFiles: ["prettier/SKILL.md"],
+    fixers: [["prettier", "--write"]], // format in place
+    checkers: [], // vtsls' LSP already reports diagnostics on edit (D10) — no separate checker
+    installs: { prettier: "bun install -g prettier" },
   },
 ];
 
@@ -133,6 +145,7 @@ export async function runHooks(pack: LangPack, files: string[], cwd: string): Pr
   }
   const n = files.length;
   const head = `⚙ post-edit hooks (${pack.id}) · ${n} file${n === 1 ? "" : "s"}`;
-  const lines = [head, ...(missing.size ? [`  not installed (skipped): ${[...missing].join(", ")}`] : []), ...reports.map((r) => `  ${r}`)];
+  const missLines = [...missing].map((m) => `  ${m} not installed — ${installHint(pack.installs[m] ?? m)}`);
+  const lines = [head, ...missLines, ...reports.map((r) => `  ${r}`)];
   return { summary: lines.join("\n"), issues };
 }

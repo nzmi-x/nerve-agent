@@ -561,7 +561,11 @@ expansion N/A; an `ipykernel` runner can be added *alongside* later if persisten
 ## D24 — Language packs: conditional skills + native post-edit hooks
 **Decision.** A language can ship a **pack** (`src/langpack.ts`) of two things, both **built-in (native)**
 and activated when a file of that language is **touched** (read/write/edit) — the same trigger as the
-LSP servers ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)), but independent of them (works under `--no-lsp`). **Python ships first:**
+LSP servers ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)), but independent of them (works under `--no-lsp`). **Two packs ship: Python** (pyrefly + ruff)
+and **TypeScript/JS** (a `prettier --write` fixer + a prettier skill; no checker — vtsls' LSP already
+reports diagnostics on edit). A missing tool surfaces a **chained install hint** (shared `installHint`
+in `src/toolchain.ts`: `uv tool install pyrefly`, `bun install -g prettier`, and "install bun/uv first"
+if the package manager itself is absent — D10/D24 use the same helper). Python's details:**
 - **Skills** — `skills/pyrefly/SKILL.md` + `skills/ruff/SKILL.md` (how to use them). **Hidden** (not in
   `skillRoots`, so not in the `/` popup); their bodies are **injected into the system prompt** only once
   Python is in play (progressive disclosure). So the agent learns the Python toolchain exactly when relevant.

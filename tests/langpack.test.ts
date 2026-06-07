@@ -14,18 +14,21 @@ test("checkSummary: a clean report ends with ': clean' (drives the no-auto-conti
   expect(checkSummary("pyrefly", "a.py:1:1 error: bad").endsWith(": clean")).toBe(false);
 });
 
-test("langForFile / activePacks: python by extension, deduped; others ignored", () => {
+test("langForFile / activePacks: python + typescript by extension, deduped; others ignored", () => {
   expect(langForFile("a/b.py")?.id).toBe("python");
   expect(langForFile("a/b.pyi")?.id).toBe("python");
-  expect(langForFile("a/b.ts")).toBeUndefined();
-  expect(activePacks(["x.py", "y.py", "z.ts"]).map((p) => p.id)).toEqual(["python"]);
-  expect(activePacks(["z.ts", "a.md"])).toEqual([]);
+  expect(langForFile("a/b.tsx")?.id).toBe("typescript");
+  expect(langForFile("a/b.js")?.id).toBe("typescript");
+  expect(langForFile("a/b.md")).toBeUndefined();
+  expect(activePacks(["x.py", "y.py", "z.ts"]).map((p) => p.id)).toEqual(["python", "typescript"]);
+  expect(activePacks(["a.md", "b.txt"])).toEqual([]);
 });
 
-test("langSkills: loads pyrefly + ruff guidance with frontmatter stripped", async () => {
+test("langSkills: loads pyrefly + ruff + prettier guidance with frontmatter stripped", async () => {
   const text = await langSkills(LANGPACKS);
   expect(text).toContain("pyrefly");
   expect(text).toContain("ruff");
+  expect(text).toContain("prettier");
   expect(text).toContain("D24"); // tells the agent nerve auto-runs them
   expect(text).not.toContain("name: pyrefly"); // YAML frontmatter removed
 });

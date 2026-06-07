@@ -1,6 +1,7 @@
 # langpack (language packs)
 
-**Status:** built (Phase 1.5), live-verified. Ships the **python** pack.
+**Status:** built (Phase 1.5), live-verified. Ships **python** (pyrefly + ruff) and **typescript/js**
+(prettier `--write`) packs. Missing tools surface a chained install hint (`src/toolchain.ts`).
 **What:** per-language **skills** (toolchain guidance injected into the system prompt when the language
 is in play) + **post-edit hooks** (auto-run fixers/checkers on the files edited that turn) — both
 native, [D24](../DECISIONS.md).
