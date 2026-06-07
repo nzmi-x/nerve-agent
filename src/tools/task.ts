@@ -13,12 +13,10 @@ const SUBAGENT_EXCLUDE = new Set(["task", "askUser", "todo"]);
 export const task: Tool = {
   name: "task",
   description:
-    "Delegate a self-contained sub-task to a fresh sub-agent (clean context, cheaper model), which works " +
-    "autonomously and returns ONLY its final summary. Give it a COMPLETE, standalone instruction — it shares " +
-    "none of your context. Best for context-heavy research you don't want polluting the main thread: search " +
-    "across many files, trace usages/callers, read and digest docs. The sub-agent is READ-ONLY (no edits, " +
-    "shell, or user questions) and cannot spawn its own sub-agents. Do the work yourself when it's small or " +
-    "needs edits; delegate when it's a big, isolable lookup.",
+    "Delegate an isolable, read-only lookup to a fresh sub-agent (clean context, cheaper model) that returns " +
+    "ONLY its final summary. Give a COMPLETE, standalone instruction — it shares none of your context. Good for " +
+    "context-heavy research (search many files, trace callers, digest docs). The sub-agent is read-only and " +
+    "can't spawn sub-agents; do small or editing work yourself.",
   parameters: {
     type: "object",
     properties: {
@@ -45,6 +43,8 @@ export const task: Tool = {
     const prompt = args.prompt.trim();
     const id = Math.random().toString(36).slice(2, 8);
     ctx.onSubagent?.({ id, prompt, phase: "start" });
+    let input = 0;
+    let output = 0;
     const out = await runSubagent({
       prompt,
       provider,
@@ -53,7 +53,11 @@ export const task: Tool = {
       cwd: ctx.cwd,
       signal: ctx.signal ?? new AbortController().signal,
       lsp: ctx.lsp,
+      onUsage: (u) => ((input += u.input), (output += u.output)),
     });
+    // Bill the subagent's token spend to the session (D6) — its OWN model's pricing, off the main context.
+    const p = model.pricing;
+    if (p && (input || output)) ctx.onCost?.((input / 1e6) * p.input + (output / 1e6) * p.output);
     ctx.onSubagent?.({ id, prompt, phase: "end", ok: !out.startsWith("subagent failed") });
     return out;
   },

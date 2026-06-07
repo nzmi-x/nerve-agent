@@ -11,6 +11,12 @@
   switch costs each turn at the right rate. Absent pricing → tokens count, cost stays `$0`.
 - `contextTokens` = the **latest** turn's input (the model re-reads the whole history each turn, so
   the last `prompt_tokens` ≈ current context occupancy) — not the cumulative sum.
+- `UsageMeter.addCost(usd)` folds in spend that **didn't run on the main thread** — a **subagent**'s token
+  cost (D6). The `task` tool sums the subagent's `usage` events (forwarded via `runSubagent`'s `onUsage`),
+  prices them at the **subagent model's** rate, and calls `ctx.onCost` → `addCost`. It adds to `costUsd`
+  only, deliberately **not** to `contextTokens` (the subagent has its own context window, so it must not
+  move the main thread's occupancy gauge). So the session **cost** includes subagent spend; the **ctx**
+  gauge stays the main thread's.
 - `formatTokens`/`formatCost`/`formatContext` produce status-line strings, e.g.
   `formatContext(200_000, 1_000_000)` → `"200k/1M (20%)"`.
 

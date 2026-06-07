@@ -18,6 +18,8 @@ export interface SubagentOptions {
   signal: AbortSignal;
   lsp?: Lsp;
   maxTurns?: number;
+  /** Forwarded the subagent's per-turn token usage so the caller can bill it to the session (D6). */
+  onUsage?: (u: { input: number; output: number }) => void;
 }
 
 const SUBAGENT_SYSTEM = `You are a focused sub-agent, spawned to complete ONE self-contained task and report back.
@@ -45,6 +47,9 @@ export async function runSubagent(o: SubagentOptions): Promise<string> {
     system: SUBAGENT_SYSTEM,
     tools: o.tools,
     maxTurns: o.maxTurns ?? 12, // bound the cost
+    onEvent: (ev) => {
+      if (ev.type === "usage") o.onUsage?.({ input: ev.input, output: ev.output }); // bill the subagent's spend
+    },
     onError: (e) => {
       failure = e instanceof Error ? e.message : String(e);
     },

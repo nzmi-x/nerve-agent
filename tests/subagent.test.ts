@@ -38,3 +38,16 @@ test("runSubagent: a no-output run reports it instead of throwing", async () => 
   const out = await runSubagent(opts(fakeProvider([[{ type: "done", reason: "stop" }]])));
   expect(out).toContain("no output");
 });
+
+test("runSubagent: forwards token usage so the caller can bill it to the session (D6)", async () => {
+  const billed = { input: 0, output: 0 };
+  const provider = fakeProvider([
+    [
+      { type: "text", delta: "Found it." },
+      { type: "usage", input: 1200, output: 340 },
+      { type: "done", reason: "stop" },
+    ],
+  ]);
+  await runSubagent({ ...opts(provider), onUsage: (u) => ((billed.input += u.input), (billed.output += u.output)) });
+  expect(billed).toEqual({ input: 1200, output: 340 });
+});

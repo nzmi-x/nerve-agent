@@ -48,6 +48,8 @@ export interface ToolContext {
   signal?: AbortSignal;
   /** Subagent lifecycle hook (the `task` tool, D6) — the TUI renders a subagents panel, headless prints. */
   onSubagent?: (ev: SubagentEvent) => void;
+  /** Charge cost incurred off the main thread (a subagent's token spend) to the session meter (D6). */
+  onCost?: (usd: number) => void;
 }
 
 export interface Tool {

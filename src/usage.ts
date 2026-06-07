@@ -40,6 +40,12 @@ export class UsageMeter {
     }
   }
 
+  /** Add cost that didn't run on the main thread (a subagent, D6): it spends money on the session but
+   *  runs in its OWN context window, so it must NOT move the `contextTokens` occupancy gauge. */
+  addCost(usd: number): void {
+    this.costUsd += usd;
+  }
+
   snapshot(): UsageSnapshot {
     return {
       inputTokens: this.inputTokens,
