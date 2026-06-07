@@ -76,7 +76,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   or editing a token simply **drops that paste** (no effect on the others, undo-safe), and tokens needn't
   stay in paste order. Logic in `affordances.ts` (`pasteToken`/`expandPastes`, tested); the `paste` event
   handler in `app.ts` does the insert.
-- **Commands:** `/help /models /mode /mouse /clear /compact /reload /sessions /resume /drop /balance /quit`
+- **Commands:** `/help /models /mode /clear /compact /reload /sessions /resume /drop /balance /quit`
   — **none take parameters**; what used to need an argument is now an **interactive picker** (`/help` is
   color-coded). System lines are consistently iconned: `·` info · `✦` ok · `⚠` warn · `✗` error.
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
@@ -107,13 +107,12 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   deliberately ones ghostty **passes to the app** and the input's Textarea doesn't bind — **PgUp/PgDn were
   dropped** (terminals like ghostty grab them for their own scrollback, so they never arrived); `Shift+↑/↓`
   is avoided too (the input uses it for text-select).
-- **The terminal owns the mouse + clipboard by default** (`useMouse:false` + `useKittyKeyboard:null`):
-  native selection, `Ctrl+Shift+C/V`, and the right-click menu are the terminal's, not the app's — at the
-  cost of no mouse-wheel scroll (keyboard scroll instead). **`/mouse` toggles this at runtime**
-  (`renderer.useMouse`): ON → the **wheel scrolls the transcript** (OpenTUI's ScrollBox handles it), but the
-  app captures the mouse so selecting text needs **Shift+drag**; OFF (default) → native select + right-click
-  copy. Lets the user opt into the wheel only when wanted. `Shift+Enter` still can't be distinguished from
-  `Enter` without Kitty (newline is Alt+Enter). See the [terminal-owns-the-mouse micro-default](../DECISIONS.md).
+- **The terminal owns the mouse + clipboard** (`useMouse:false` + `useKittyKeyboard:null`): native selection,
+  `Ctrl+Shift+C/V`, and the right-click menu are the terminal's, not the app's. Mouse capture is **off for
+  good** — no runtime toggle: the side panels break rectangular selection, so capturing the wheel would cost
+  native select + right-click copy for a scroll the keyboard already covers (Ctrl/Alt+↑/↓) — a bad trade.
+  `Shift+Enter` still can't be distinguished from `Enter` without Kitty (newline is Alt+Enter). See the
+  [terminal-owns-the-mouse micro-default](../DECISIONS.md).
 - **No redundant logs:** state changes that already have a visible indicator don't also print a transcript
   line — mode (PLAN/EDIT badge), model (`/model`, shown in the bar/panel), and the sidebar toggle are silent.
 
@@ -139,7 +138,6 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Scroll keys can be grabbed by the terminal:** ghostty binds `shift+page_up/down` (scrollback),
   `ctrl+page_up/down` (tabs), `shift+home/end` (scroll) — those never reach the app (`ghostty
   +list-keybinds` lists them). **Plain PgUp/PgDn turned out not to arrive either in practice, so they were
-  removed**; nerve scrolls on **Ctrl/Alt+↑/↓** (verified arriving). If a terminal grabs even those,
-  **`/mouse`** (wheel) is the fallback.
+  removed**; nerve scrolls on **Ctrl/Alt+↑/↓** (verified arriving).
 
 **See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [affordances/D14](../DECISIONS.md) · [usage](usage.md) · [balance](balance.md)

@@ -25,7 +25,6 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
   { name: "models", description: "Switch model (interactive picker)" },
   { name: "mode", description: "Toggle PLAN ↔ EDIT" },
-  { name: "mouse", description: "Toggle mouse capture (wheel-scroll ↔ native select/copy)" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "compact", description: "Summarize old turns to free up context" },
   { name: "reload", description: "Hot-swap tools + interceptors from disk (Ctrl+R)" },

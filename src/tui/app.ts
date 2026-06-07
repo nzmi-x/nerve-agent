@@ -106,7 +106,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // menu) and no Kitty keyboard protocol (so the terminal's own Ctrl+Shift+C/V copy-paste keep working
   // instead of being grabbed by the app). Trade-off: Shift+Enter isn't distinguishable from Enter without
   // Kitty, so the multi-line newline is Alt+Enter; and transcript scroll is by keyboard (Ctrl+↑/↓).
-  // `/mouse` flips `renderer.useMouse` at runtime to opt into wheel-scroll (then select needs Shift+drag).
+  // Mouse capture stays off for good: the side panels break rectangular selection, so capturing the wheel
+  // would cost native select + right-click copy for a scroll the keyboard already covers — a bad trade.
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30, useMouse: false, useKittyKeyboard: null });
   renderer.setBackgroundColor(DARKFG);
   const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
@@ -867,7 +868,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/resume", "resume the last session");
     cmd("/models", "switch model (interactive picker)");
     cmd("/mode", "toggle PLAN ↔ EDIT");
-    cmd("/mouse", "toggle mouse (wheel-scroll ↔ native select/copy)");
     cmd("/compact", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
     cmd("/reload", "hot-reload tools + interceptors");
@@ -922,14 +922,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return void drop();
       case "mode":
         toggleMode(); // just flip PLAN ↔ EDIT — no need to name the target (badge is the indicator)
-        return;
-      case "mouse":
-        // Toggle mouse capture at runtime: ON → the wheel scrolls the transcript, but the app owns the
-        // mouse so native click-drag select is replaced by Shift+drag. OFF (default) → native select +
-        // right-click copy, scroll by keyboard. Lets the user opt into the wheel only when they want it.
-        renderer.useMouse = !renderer.useMouse;
-        if (renderer.useMouse) sysOk("mouse ON — wheel scrolls the transcript · Shift+drag to select text");
-        else sysInfo("mouse OFF — native select + right-click copy · Ctrl+↑/↓ to scroll");
         return;
       case "models":
         openPicker({
@@ -1182,7 +1174,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // (Autosuggest + submit are wired via the Textarea's onContentChange / onSubmit, set at construction.)
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (key.ctrl && key.name === "c") return void shutdown(); // Ctrl+Shift+C is now the terminal's copy (Kitty off)
-    // Keyboard scroll (mouse off → no wheel unless `/mouse`). Ctrl+↑/↓ or Alt+↑/↓ scroll a few lines —
+    // Keyboard scroll (mouse capture is off, so there's no wheel). Ctrl+↑/↓ or Alt+↑/↓ scroll a few lines —
     // keys ghostty passes to the app and the input's Textarea doesn't bind. (PgUp/PgDn were dropped: many
     // terminals grab them for their own scrollback, so they never arrived.) ScrollBox drops sticky on scroll.
     const scroll = (delta: number): void => void (key.preventDefault(), transcript.scrollBy(delta));

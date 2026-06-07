@@ -54,7 +54,7 @@ test("atSuggestions: completes paths; dirs get '/'; dotfiles hidden unless asked
 
 test("slashSuggestions: prefix-matches builtins and skills", () => {
   const names = (q: string) => slashSuggestions(q, [{ name: "opentui", description: "" }]).map((c) => c.name);
-  expect(names("mo")).toEqual(["models", "mode", "mouse"]);
+  expect(names("mo")).toEqual(["models", "mode"]);
   expect(names("dr")).toEqual(["drop"]);
   expect(names("op")).toEqual(["opentui"]); // a skill
   expect(names("")).toContain("help");
