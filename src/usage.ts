@@ -14,6 +14,12 @@ export interface Usage {
   output: number;
 }
 
+/** USD for a usage at a pricing (cache-miss rate). The one home for the cost formula — used by the meter
+ *  and by the `task` tool to bill subagent spend (D6). Absent pricing → 0. */
+export function costOf(usage: Usage, pricing?: Pricing): number {
+  return pricing ? (usage.input / 1e6) * pricing.input + (usage.output / 1e6) * pricing.output : 0;
+}
+
 export interface UsageSnapshot {
   inputTokens: number; // cumulative
   outputTokens: number; // cumulative
@@ -35,9 +41,7 @@ export class UsageMeter {
     this.outputTokens += usage.output;
     this.contextTokens = usage.input; // the model re-reads the whole history each turn, so latest input ≈ context size
     this.turns += 1;
-    if (pricing) {
-      this.costUsd += (usage.input / 1e6) * pricing.input + (usage.output / 1e6) * pricing.output;
-    }
+    this.costUsd += costOf(usage, pricing);
   }
 
   /** Add cost that didn't run on the main thread (a subagent, D6): it spends money on the session but

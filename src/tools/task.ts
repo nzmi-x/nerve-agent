@@ -4,6 +4,7 @@
 // sub-loop via `runSubagent`. Read-only itself (it only spawns a PLAN-mode subagent) → PLAN-safe.
 import { runSubagent } from "../subagent.ts";
 import { loadModels, selectSubagentModel, providerFor } from "../config.ts";
+import { costOf } from "../usage.ts";
 import { tools } from "./registry.ts";
 import type { Tool } from "./types.ts";
 
@@ -56,8 +57,8 @@ export const task: Tool = {
       onUsage: (u) => ((input += u.input), (output += u.output)),
     });
     // Bill the subagent's token spend to the session (D6) — its OWN model's pricing, off the main context.
-    const p = model.pricing;
-    if (p && (input || output)) ctx.onCost?.((input / 1e6) * p.input + (output / 1e6) * p.output);
+    const usd = costOf({ input, output }, model.pricing);
+    if (usd) ctx.onCost?.(usd);
     ctx.onSubagent?.({ id, prompt, phase: "end", ok: !out.startsWith("subagent failed") });
     return out;
   },
