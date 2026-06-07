@@ -117,6 +117,23 @@ export async function loadSkillBody(path: string): Promise<string> {
   return md.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
 
+/** A long (>200 chars) or multi-line paste collapses to a compact token in the input (#3); `null` =
+ *  short single-line, insert it as-is. The full text is stashed by the caller and restored on send. */
+export function pasteToken(text: string): { token: string; lines: number } | null {
+  const lines = text.replace(/\n+$/, "").split("\n").length;
+  if (lines <= 1 && text.length <= 200) return null;
+  return { token: `[Pasted ${lines} line${lines === 1 ? "" : "s"}]`, lines };
+}
+
+/** Restore stashed paste content (in paste order) into a message before it's sent; clears `stash`. */
+export function expandPastes(text: string, stash: string[]): string {
+  if (!stash.length) return text;
+  let i = 0;
+  const out = text.replace(/\[Pasted \d+ lines?\]/g, () => stash[i++] ?? "");
+  stash.length = 0;
+  return out;
+}
+
 function parseFrontmatter(md: string): { name?: string; description?: string } {
   const m = /^---\n([\s\S]*?)\n---/.exec(md);
   if (!m) return {};

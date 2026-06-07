@@ -28,7 +28,7 @@ import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { selectModel, providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
-import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, type CommandInfo, type Skill } from "./affordances.ts";
+import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
@@ -135,6 +135,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let turnAbort: AbortController | null = null;
   let lineId = 0;
   let echoGuard: string | null = null;
+  // Long/multi-line pastes collapse to a "[Pasted N lines]" token in the input (so they don't flood it);
+  // the full text is stashed here and substituted back, in order, when the message is sent (#3).
+  const pastes: string[] = [];
   let pendingRetheme = false; // a system light/dark change arrived mid-turn — apply it once idle (D30)
   let themeMonitor: ReturnType<typeof Bun.spawn> | null = null;
 
@@ -788,13 +791,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   }
 
   async function submit(value: string): Promise<void> {
-    const text = value.trim();
+    const raw = value.trim();
     input.value = "";
     clearSuggest();
-    if (!text || busy) return;
-    if (text.startsWith("!")) return void runShell(text.slice(1));
-    if (text.startsWith("/")) return void runCommand(text);
-    await sendPrompt(text, () => t`${bold(fg(GREEN)("❯"))} ${text}`);
+    if (!raw || busy) return void (pastes.length = 0);
+    const expanded = expandPastes(raw, pastes); // restore any "[Pasted N lines]" tokens (also clears the stash)
+    if (raw.startsWith("!")) return void runShell(expanded.slice(1));
+    if (raw.startsWith("/")) return void runCommand(raw); // commands run literally (paste tokens pass through)
+    await sendPrompt(expanded, () => t`${bold(fg(GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
   }
 
   // Send a prompt to the agent: echo a transcript line, persist the (possibly longer) model text, run a turn.
@@ -1018,6 +1022,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     if (key.name === "tab") return void toggleMode(); // plain Tab with no popup also toggles the mode
     if (key.name === "escape") turnAbort?.abort();
+  });
+
+  // Paste shortening (#3): a long or multi-line paste becomes a compact "[Pasted N lines]" token in the
+  // input (the full text is stashed + restored on send), so the single-line box isn't flooded / collapsed.
+  renderer.keyInput.on("paste", (ev: { bytes: Uint8Array; preventDefault: () => void }) => {
+    const text = new TextDecoder().decode(ev.bytes);
+    const p = pasteToken(text);
+    if (!p) return; // short single-line paste → let the input insert it normally
+    ev.preventDefault();
+    pastes.push(text);
+    input.value = `${input.value}${p.token}`; // fires INPUT → suggestions refresh
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title

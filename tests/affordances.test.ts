@@ -10,6 +10,8 @@ import {
   applyAtSuggestion,
   discoverSkills,
   loadSkillBody,
+  pasteToken,
+  expandPastes,
 } from "../src/tui/affordances.ts";
 
 // --- parseAffordance --------------------------------------------------------
@@ -74,6 +76,22 @@ test("discoverSkills: reads SKILL.md frontmatter + captures the path for lazy in
   expect(opentui).toBeDefined();
   expect(opentui!.description.length).toBeGreaterThan(0);
   expect(opentui!.path).toContain(join("opentui", "SKILL.md"));
+});
+
+test("pasteToken: collapses multi-line / long pastes, leaves short single-line as-is (#3)", () => {
+  expect(pasteToken("just a short line")).toBeNull();
+  expect(pasteToken("one short line\n")).toBeNull(); // a trailing newline alone is still 1 short line
+  expect(pasteToken("a\nb\nc")).toEqual({ token: "[Pasted 3 lines]", lines: 3 });
+  expect(pasteToken("a\nb\n")?.token).toBe("[Pasted 2 lines]"); // trailing newline ignored → 2 lines
+  expect(pasteToken("x".repeat(250))?.token).toBe("[Pasted 1 line]"); // long single line still collapses
+});
+
+test("expandPastes: restores stashed pastes in order, clears the stash (#3)", () => {
+  const stash = ["FULL ONE", "FULL TWO"];
+  const out = expandPastes("see [Pasted 2 lines] and [Pasted 9 lines] please", stash);
+  expect(out).toBe("see FULL ONE and FULL TWO please");
+  expect(stash).toHaveLength(0); // consumed
+  expect(expandPastes("nothing to do", [])).toBe("nothing to do");
 });
 
 test("loadSkillBody: strips frontmatter, returns the skill instructions (D12)", async () => {
