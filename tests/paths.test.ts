@@ -1,5 +1,5 @@
 import { test, expect, afterEach } from "bun:test";
-import { projectSlug, projectDir, sessionsDir, skillRoots, commandRoots, globalModelsPath } from "../src/paths.ts";
+import { projectSlug, projectDir, skillRoots, commandRoots, globalModelsPath } from "../src/paths.ts";
 
 const saved = Bun.env.NERVE_HOME;
 afterEach(() => {
@@ -15,7 +15,6 @@ test("projectSlug: absolute cwd with '/' → '-' (Claude-style, collision-free)"
 test("paths hang off $NERVE_HOME/projects/<slug>", () => {
   Bun.env.NERVE_HOME = "/tmp/nh";
   expect(projectDir("/work/repo")).toBe("/tmp/nh/projects/-work-repo");
-  expect(sessionsDir("/work/repo")).toBe("/tmp/nh/projects/-work-repo/sessions");
   expect(globalModelsPath()).toBe("/tmp/nh/models.json");
 });
 

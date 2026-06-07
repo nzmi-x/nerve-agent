@@ -1,16 +1,17 @@
-// The conversation accumulator + persistence. Folds StreamEvents into the in-progress assistant
-// turn and persists typed JSONL lines: {"t":"msg"} (canonical — replayed on resume) and {"t":"delta"}
-// (token-tap telemetry — ignored on resume). See ARCHITECTURE_BRIEF §6, DECISIONS D8, docs/manual/session.md.
-import { createWriteStream, existsSync, mkdirSync, readFileSync, type WriteStream } from "node:fs";
-import { join } from "node:path";
+// The conversation accumulator + SQLite persistence (D31). Folds StreamEvents into the in-progress
+// assistant turn and persists each canonical message as a row in the per-project DB (src/db.ts),
+// replacing the old append-only JSONL. Resume rebuilds the live message list from the rows + the latest
+// compaction marker. The public API is unchanged, so loop.ts/surfaces are untouched. See
+// ARCHITECTURE_BRIEF §6, DECISIONS D8/D17/D31, docs/manual/session.md.
+import type { Database } from "bun:sqlite";
 import { summaryMessage } from "./compaction.ts";
-import { sessionsDir } from "./paths.ts";
+import { openDb } from "./db.ts";
 import type { Message, StreamEvent, ToolCall } from "./providers/types.ts";
 
 export interface SessionInit {
   id?: string;
-  dir?: string;
-  /** Reload prior `msg` lines from the existing file (for `--resume`). */
+  cwd?: string;
+  /** Reload prior messages from the DB (for `--resume`). */
   resume?: boolean;
 }
 
@@ -21,16 +22,23 @@ interface ToolCallBuf {
   signature?: string;
 }
 
+interface MsgRow {
+  role: string;
+  content: string;
+  reasoning: string | null;
+  tool_calls: string | null;
+  tool_call_id: string | null;
+}
+
 export class Session {
   readonly id: string;
   readonly messages: Message[] = [];
-  title = ""; // a short agent-generated label, set once at the start of the session (D26)
-  private readonly dir: string;
-  private readonly path: string;
-  private sink: WriteStream | null = null; // opened lazily on the first write — no empty files (D27)
+  title = ""; // a short agent-generated label, set once near the start of the session (D26)
+  private readonly db: Database;
+  private started = false; // whether the `sessions` row exists — created lazily on the first write (D27)
 
-  // Count of canonical `msg` lines ever written — the global ordinal compaction anchors against (D17).
-  // A compacted summary is NOT a msg line, so it doesn't advance this; kept messages keep their ordinals.
+  // Count of canonical messages ever written — the global ordinal compaction anchors against (D17).
+  // A compacted summary is NOT a message, so it doesn't advance this; kept messages keep their ordinals.
   private totalMsgs = 0;
 
   // in-progress assistant turn
@@ -40,38 +48,43 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.id = init.id ?? new Date().toISOString().replace(/[:.]/g, "-");
-    this.dir = init.dir ?? sessionsDir(); // ~/.nerve/projects/<slug>/sessions (D22)
-    this.path = join(this.dir, `${this.id}.jsonl`);
-    if (init.resume && existsSync(this.path)) {
-      const loaded = loadSession(this.path);
+    this.db = openDb(init.cwd);
+    if (init.resume) {
+      const loaded = load(this.db, this.id);
       this.messages.push(...loaded.messages);
       this.totalMsgs = loaded.total;
       this.title = loaded.title;
+      this.started = loaded.exists;
     }
-    // The file isn't created here — only on the first writeLine (D27), so opening the TUI without
-    // sending anything leaves no empty transcript behind.
+    // No `sessions` row is created here — only on the first write (D27), so opening the TUI without
+    // sending anything leaves no empty session behind.
   }
 
-  private writeLine(obj: unknown): void {
-    if (!this.sink) {
-      mkdirSync(this.dir, { recursive: true });
-      this.sink = createWriteStream(this.path, { flags: "a" });
-    }
-    this.sink.write(JSON.stringify(obj) + "\n");
+  private ensureStarted(): void {
+    if (this.started) return;
+    const now = Date.now();
+    this.db.query("INSERT OR IGNORE INTO sessions(id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").run(this.id, this.title, now, now);
+    this.started = true;
+  }
+
+  /** Persist one canonical message as a row at the current global ordinal, then bump it. */
+  private insert(msg: Message): void {
+    this.ensureStarted();
+    this.db
+      .query("INSERT INTO messages(session_id, seq, role, content, reasoning, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(this.id, this.totalMsgs, msg.role, msg.content, msg.reasoning ?? null, msg.toolCalls ? JSON.stringify(msg.toolCalls) : null, msg.toolCallId ?? null);
+    this.totalMsgs++;
+    this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(Date.now(), this.id);
   }
 
   addUser(content: string): void {
     const msg: Message = { role: "user", content };
     this.messages.push(msg);
-    this.totalMsgs++;
-    this.writeLine({ t: "msg", ...msg });
+    this.insert(msg);
   }
 
-  /** Token-tap telemetry: raw text/reasoning deltas + usage, written as `delta` lines. */
-  tap(ev: StreamEvent): void {
-    if (ev.type === "text" || ev.type === "reasoning") this.writeLine({ t: "delta", type: ev.type, delta: ev.delta });
-    else if (ev.type === "usage") this.writeLine({ t: "delta", type: "usage", input: ev.input, output: ev.output });
-  }
+  /** Token-tap telemetry is not persisted in the SQLite store — it was unused on resume (D31). No-op. */
+  tap(_ev: StreamEvent): void {}
 
   /** Fold one StreamEvent into the in-progress assistant turn. */
   apply(ev: StreamEvent): void {
@@ -98,8 +111,7 @@ export class Session {
       ...(toolCalls.length ? { toolCalls } : {}),
     };
     this.messages.push(msg);
-    this.totalMsgs++;
-    this.writeLine({ t: "msg", ...msg });
+    this.insert(msg);
     this.text = "";
     this.reasoning = "";
     this.toolBufs.clear();
@@ -127,72 +139,60 @@ export class Session {
   addToolResult(toolCallId: string, content: string): void {
     const msg: Message = { role: "tool", content, toolCallId };
     this.messages.push(msg);
-    this.totalMsgs++;
-    this.writeLine({ t: "msg", ...msg });
+    this.insert(msg);
   }
 
   /**
-   * Compaction (D17): replace live context with `[summary, …last keepCount messages]` and append a
-   * `{"t":"compaction"}` marker. The append-only log is NOT rewritten — `firstKept` is the global
-   * ordinal of the first kept message, and resume rebuilds the same shape from it. `keepCount` counts
-   * real (kept) messages; the caller derives it from `pickCutPoint` (so kept never includes a prior
-   * synthetic summary).
+   * Compaction (D17): replace live context with `[summary, …last keepCount messages]` and record a
+   * compaction marker. The message rows are NOT deleted — `first_kept` is the global ordinal of the
+   * first kept message, and resume rebuilds the same shape from it. `keepCount` counts real (kept)
+   * messages; the caller derives it from `pickCutPoint` (so kept never includes a prior summary).
    */
   compact(summary: string, keepCount: number): void {
     const firstKept = this.totalMsgs - keepCount;
     const kept = this.messages.slice(this.messages.length - keepCount);
     this.messages.length = 0;
     this.messages.push(summaryMessage(summary), ...kept);
-    this.writeLine({ t: "compaction", summary, firstKept });
+    this.ensureStarted();
+    this.db.query("INSERT INTO compactions(session_id, at, summary, first_kept) VALUES (?, ?, ?, ?)").run(this.id, Date.now(), summary, firstKept);
+    this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(Date.now(), this.id);
   }
 
-  /** Set the session's short title (D26) — persisted as a `{"t":"title"}` line; latest wins on resume. */
+  /** Set the session's short title (D26) — a column on the `sessions` row; latest wins on resume. */
   setTitle(title: string): void {
     this.title = title;
-    this.writeLine({ t: "title", title });
+    this.ensureStarted();
+    this.db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), this.id);
   }
 
-  /** Flush and close the JSONL sink (a no-op if nothing was ever written). */
+  /** No-op: writes are synchronous and already committed. Kept async so callers don't change. */
   close(): Promise<void> {
-    const sink = this.sink;
-    if (!sink) return Promise.resolve();
-    return new Promise((resolve) => sink.end(resolve));
+    return Promise.resolve();
   }
 }
 
-/**
- * Read a session file into the live message list + the global `msg` count (D8/D17). `msg` lines are
- * the canonical conversation; `delta` lines are telemetry (ignored); a `compaction` line collapses
- * history — the LATEST one wins: `messages = [summary, …allMsgs.slice(firstKept)]`. `total` always
- * counts every `msg` line so the next compaction's ordinals line up.
- */
-export function loadSession(path: string): { messages: Message[]; total: number; title: string } {
-  if (!existsSync(path)) return { messages: [], total: 0, title: "" };
-  const all: Message[] = [];
-  let latest: { summary: string; firstKept: number } | null = null;
-  let title = "";
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    if (!line) continue;
-    try {
-      const o = JSON.parse(line) as Record<string, unknown> & { t?: string };
-      if (o.t === "msg") {
-        const { t, ...msg } = o;
-        all.push(msg as unknown as Message);
-      } else if (o.t === "compaction") {
-        latest = { summary: String(o.summary ?? ""), firstKept: Number(o.firstKept ?? 0) };
-      } else if (o.t === "title") {
-        title = String(o.title ?? "");
-      }
-    } catch {
-      // skip a malformed line rather than fail the whole resume
-    }
-  }
+/** Rebuild a stored session from its rows: messages (latest compaction applied) + total ordinal + title. */
+function load(db: Database, id: string): { messages: Message[]; total: number; title: string; exists: boolean } {
+  const srow = db.query("SELECT title FROM sessions WHERE id = ?").get(id) as { title: string } | null;
+  if (!srow) return { messages: [], total: 0, title: "", exists: false };
+  const rows = db.query("SELECT role, content, reasoning, tool_calls, tool_call_id FROM messages WHERE session_id = ? ORDER BY seq").all(id) as MsgRow[];
+  const all = rows.map(toMessage);
+  const comp = db.query("SELECT summary, first_kept FROM compactions WHERE session_id = ? ORDER BY at DESC, rowid DESC LIMIT 1").get(id) as { summary: string; first_kept: number } | null;
   const total = all.length;
-  const messages = latest ? [summaryMessage(latest.summary), ...all.slice(latest.firstKept)] : all;
-  return { messages, total, title };
+  const messages = comp ? [summaryMessage(comp.summary), ...all.slice(comp.first_kept)] : all;
+  return { messages, total, title: srow.title, exists: true };
 }
 
-/** Back-compat: just the rebuilt message list (see {@link loadSession}). */
-export function loadMessages(path: string): Message[] {
-  return loadSession(path).messages;
+function toMessage(r: MsgRow): Message {
+  const m: Message = { role: r.role as Message["role"], content: r.content };
+  if (r.reasoning) m.reasoning = r.reasoning;
+  if (r.tool_calls) m.toolCalls = JSON.parse(r.tool_calls) as ToolCall[];
+  if (r.tool_call_id) m.toolCallId = r.tool_call_id;
+  return m;
+}
+
+/** Rebuild a stored session (messages + total ordinal + title), applying the latest compaction (D17). */
+export function loadSession(cwd: string, id: string): { messages: Message[]; total: number; title: string } {
+  const { messages, total, title } = load(openDb(cwd), id);
+  return { messages, total, title };
 }

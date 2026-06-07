@@ -3,8 +3,7 @@
 // model · mode · cost · context · balance) plus a collapsible sidebar (session + files panels). The
 // sidebar toggles on Ctrl+B and auto-hides on narrow terminals. Affordances: @file, !shell, /command +
 // an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
-import { existsSync, unlinkSync } from "node:fs";
-import { join, relative } from "node:path";
+import { relative } from "node:path";
 import {
   createCliRenderer,
   BoxRenderable,
@@ -33,8 +32,7 @@ import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSu
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
-import { listSessions, lastSessionId } from "../sessions.ts";
-import { sessionsDir } from "../paths.ts";
+import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
@@ -590,12 +588,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function drop(): Promise<void> {
     const old = session.id;
     await session.close();
-    try {
-      unlinkSync(join(sessionsDir(cwd), `${old}.jsonl`));
-    } catch {
-      /* already gone */
-    }
-    session = new Session({});
+    deleteSession(cwd, old);
+    session = new Session({ cwd });
     meter = new UsageMeter();
     langTouched.clear(); // fresh session: empty the files panel + reset language packs
     sessionEdited.clear();
@@ -609,11 +603,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // /resume [id] — switch to an existing session (default: the most recent one that isn't this one).
   async function resumeSession(idArg?: string): Promise<void> {
     if (busy) return;
-    const id = idArg ?? lastSessionId(sessionsDir(cwd), session.id);
+    const id = idArg ?? lastSessionId(cwd, session.id);
     if (!id) return void addPlain("no other session to resume", () => MUTE);
-    if (!existsSync(join(sessionsDir(cwd), `${id}.jsonl`))) return void addPlain(`✗ no session '${id}'`, () => RED);
+    if (!sessionExists(cwd, id)) return void addPlain(`✗ no session '${id}'`, () => RED);
     await session.close();
-    session = new Session({ id, resume: true });
+    session = new Session({ id, resume: true, cwd });
     meter = new UsageMeter();
     langTouched.clear(); // we don't replay tool calls — the files panel starts empty for the resumed session
     sessionEdited.clear();
@@ -631,15 +625,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const id = args[1];
       if (!id) return void addPlain("usage: /sessions delete <id>", () => MUTE);
       if (id === session.id) return void addPlain("✗ that's the current session — use /drop", () => RED);
-      try {
-        unlinkSync(join(sessionsDir(cwd), `${id}.jsonl`));
-        addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
-      } catch {
-        addPlain(`✗ no session '${id}'`, () => RED);
-      }
+      if (!sessionExists(cwd, id)) return void addPlain(`✗ no session '${id}'`, () => RED);
+      deleteSession(cwd, id);
+      addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
       return;
     }
-    const list = listSessions(sessionsDir(cwd));
+    const list = listSessions(cwd);
     if (!list.length) return void addPlain("no sessions yet", () => MUTE);
     addText(() => t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
     for (const s of list) {

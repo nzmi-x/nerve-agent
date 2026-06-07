@@ -18,7 +18,7 @@ Decisions and their rationale live in [DECISIONS.md](DECISIONS.md); rules in [AG
               │  dispatcher │◀── mode gate (PLAN/EDIT, human-only) ────│   tui    │ OpenTUI render
               │  → tools    │ ───────────────────────────────────────▶ └──────────┘ (status: mode+model)
               └─────────────┘                                                │
-                     │ msg lines (resume) + delta lines (token-tap telemetry) ─▶ ~/.nerve/projects/<slug>/sessions/<id>.jsonl
+                     │ message rows (resume) ─▶ ~/.nerve/projects/<slug>/nerve.db (bun:sqlite, D31)
 ```
 
 ## 1. The normalized event contract (the one abstraction worth having)
@@ -88,7 +88,7 @@ export interface StreamCtl {
 
 | Interceptor          | Capability   | What it does                                                                 |
 | -------------------- | ------------ | ---------------------------------------------------------------------------- |
-| **token-tap**        | observe      | Tees every `text`/`reasoning` delta + `usage` to the `~/.nerve/projects/<slug>/sessions` JSONL sink (§6). |
+| **token-tap**        | observe      | Forwards each event to `session.tap()` — a hot-swappable observe seam. The default `tap` persists nothing under [D31](DECISIONS.md) (per-token telemetry was dropped with JSONL); the hook stays for custom taps. |
 | **stop-guard**       | abort        | Watches `ctl.text`; `ctl.abort()`s the fetch the instant a configured banned/terminal pattern appears — kills wasted tokens. |
 | **reasoning-router** | route        | Sends `reasoning` deltas to a dimmed/foldable TUI region, distinct from answer text. |
 | **secret-redaction** | rewrite      | Scrubs secret/token patterns from deltas *before* UI or log, so an echoed key never persists. |
@@ -239,12 +239,14 @@ implementation, never ahead of it.
 turns — DeepSeek's `reasoning_content` and Gemini's `thoughtSignature` (omitting the latter is a hard
 400). See [providers.md §0](providers.md). So an assistant message persists not just text + tool
 calls but the opaque reasoning blob/signature that produced them.
-Persistence is **append-only JSONL** at `~/.nerve/projects/<slug>/sessions/<id>.jsonl` with **typed lines**
-(see [DECISIONS.md D8](DECISIONS.md)): `{"t":"msg",...}` canonical messages (user/assistant/tool,
-*including* the stored reasoning artifact) and optional `{"t":"delta",...}` raw deltas written by
-the token-tap interceptor. **Resume (`--resume` / last) replays only the `msg` lines** to rebuild
-state; the `delta` lines are telemetry/debug and are ignored on replay. One file, two purposes, no
-ambiguity. No DB, greppable, crash-recoverable, and the agent can read its own past sessions.
+Persistence is **SQLite** (`bun:sqlite`) at `~/.nerve/projects/<slug>/nerve.db`, one DB per project
+(see [DECISIONS.md D31](DECISIONS.md)): a `messages` row per canonical message (user/assistant/tool,
+*including* the stored reasoning artifact + `tool_calls`), at a global ordinal `seq`. **Resume
+(`--resume` / last) `SELECT`s the rows** ordered by `seq` and applies the latest compaction marker to
+rebuild state. The `sessions` row (id + title + timestamps) is created lazily on the first write ([D27](DECISIONS.md)),
+and `listSessions`/`lastSessionId` are indexed queries (`src/sessions.ts`). Token-tap telemetry is no
+longer persisted (dropped with JSONL). One Bun-native substrate, transactional, queryable — and
+**skills + config stay on the filesystem**, never in the DB.
 
 ## 7. Claude compatibility — context & skills (`src/context.ts`)
 

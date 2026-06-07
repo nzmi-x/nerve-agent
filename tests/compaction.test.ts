@@ -75,16 +75,18 @@ test("summarize: a provider error throws (so the caller leaves the session untou
 
 // --- Session compaction round-trip ------------------------------------------
 
-let dir: string;
+let home: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "nerve-compact-"));
+  home = await mkdtemp(join(tmpdir(), "nerve-compact-"));
+  process.env.NERVE_HOME = home;
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  delete process.env.NERVE_HOME;
+  await rm(home, { recursive: true, force: true });
 });
 
 test("Session.compact: rebuilds live context, and resume reconstructs the same shape (D17)", async () => {
-  const s = new Session({ id: "C", dir });
+  const s = new Session({ id: "C" });
   s.addUser("u1");
   s.apply({ type: "text", delta: "a1" });
   s.commitAssistant();
@@ -100,18 +102,18 @@ test("Session.compact: rebuilds live context, and resume reconstructs the same s
   expect(live.slice(1)).toEqual([["user", "u2"], ["assistant", "a2"]]);
   await s.close();
 
-  const r = loadSession(join(dir, "C.jsonl"));
-  expect(r.total).toBe(4); // every msg line still counted, for the next compaction's ordinals
+  const r = loadSession(process.cwd(), "C");
+  expect(r.total).toBe(4); // every message row still counted, for the next compaction's ordinals
   expect(r.messages.map((m) => [m.role, m.content])).toEqual(live); // resumed === live
 });
 
-test("loadSession: a non-compacted file returns all msgs unchanged", async () => {
-  const s = new Session({ id: "N", dir });
+test("loadSession: a non-compacted session returns all msgs unchanged", async () => {
+  const s = new Session({ id: "N" });
   s.addUser("a");
   s.apply({ type: "text", delta: "b" });
   s.commitAssistant();
   await s.close();
-  const r = loadSession(join(dir, "N.jsonl"));
+  const r = loadSession(process.cwd(), "N");
   expect(r.total).toBe(2);
   expect(r.messages.map((m) => m.content)).toEqual(["a", "b"]);
 });

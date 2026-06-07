@@ -1,49 +1,53 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listSessions, lastSessionId } from "../src/sessions.ts";
+import { Session } from "../src/session.ts";
+import { openDb } from "../src/db.ts";
 
-let dir: string;
+let home: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "nerve-sessions-"));
+  home = await mkdtemp(join(tmpdir(), "nerve-sessions-"));
+  process.env.NERVE_HOME = home; // a fresh per-project DB per test
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  delete process.env.NERVE_HOME;
+  await rm(home, { recursive: true, force: true });
 });
 
-function writeSession(id: string, lines: unknown[], mtimeSec: number): void {
-  const path = join(dir, `${id}.jsonl`);
-  writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  utimesSync(path, mtimeSec, mtimeSec);
+/** Create a session with messages, then pin its updated_at so ordering is deterministic. */
+function makeSession(id: string, msgs: [role: string, content: string][], updatedAt: number): void {
+  const s = new Session({ id });
+  for (const [role, content] of msgs) {
+    if (role === "user") s.addUser(content);
+    else if (role === "assistant") {
+      s.apply({ type: "text", delta: content });
+      s.commitAssistant();
+    } else s.addToolResult("x", content);
+  }
+  openDb(process.cwd()).query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(updatedAt, id);
 }
 
-test("listSessions: newest first, counts only msg lines, previews first user message", () => {
-  writeSession("old", [{ t: "msg", role: "user", content: "old task here" }, { t: "msg", role: "assistant", content: "ok" }], 1000);
-  writeSession("new", [
-    { t: "delta", type: "text", delta: "x" },
-    { t: "msg", role: "user", content: "new task" },
-    { t: "msg", role: "assistant", content: "done" },
-    { t: "msg", role: "tool", content: "r" },
-  ], 2000);
+test("listSessions: newest first, counts messages, previews first user message", () => {
+  makeSession("old", [["user", "old task here"], ["assistant", "ok"]], 1000);
+  makeSession("new", [["user", "new task"], ["assistant", "done"], ["tool", "r"]], 2000);
 
-  const list = listSessions(dir);
+  const list = listSessions();
   expect(list.map((s) => s.id)).toEqual(["new", "old"]);
-  expect(list[0]!.msgs).toBe(3); // delta line not counted
+  expect(list[0]!.msgs).toBe(3);
   expect(list[0]!.preview).toBe("new task");
   expect(list[1]!.preview).toBe("old task here");
 });
 
-test("lastSessionId: newest by mtime, honors exclude", () => {
-  writeSession("a", [{ t: "msg", role: "user", content: "a" }], 1000);
-  writeSession("b", [{ t: "msg", role: "user", content: "b" }], 2000);
-  expect(lastSessionId(dir)).toBe("b");
-  expect(lastSessionId(dir, "b")).toBe("a"); // skip the current session → previous one
+test("lastSessionId: newest by updated_at, honors exclude", () => {
+  makeSession("a", [["user", "a"]], 1000);
+  makeSession("b", [["user", "b"]], 2000);
+  expect(lastSessionId()).toBe("b");
+  expect(lastSessionId(undefined, "b")).toBe("a"); // skip the current session → previous one
 });
 
-test("missing dir → empty / undefined", () => {
-  const none = join(dir, "nope");
-  expect(listSessions(none)).toEqual([]);
-  expect(lastSessionId(none)).toBeUndefined();
+test("empty project → empty / undefined", () => {
+  expect(listSessions()).toEqual([]);
+  expect(lastSessionId()).toBeUndefined();
 });

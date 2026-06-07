@@ -22,13 +22,15 @@ function fakeProvider(turns: StreamEvent[][]): Provider {
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "nerve-loop-"));
+  process.env.NERVE_HOME = dir; // isolate the session DB per test
 });
 afterEach(async () => {
+  delete process.env.NERVE_HOME;
   await rm(dir, { recursive: true, force: true });
 });
 
 test("loop: streams, dispatches a tool call, feeds the result back, and finishes", async () => {
-  const session = new Session({ id: "L", dir });
+  const session = new Session({ id: "L" });
   session.addUser("make a file");
 
   const provider = fakeProvider([
@@ -64,7 +66,7 @@ test("loop: streams, dispatches a tool call, feeds the result back, and finishes
 });
 
 test("loop: a pre-aborted signal runs no turns", async () => {
-  const session = new Session({ id: "A", dir });
+  const session = new Session({ id: "A" });
   session.addUser("hi");
   const ac = new AbortController();
   ac.abort();
@@ -82,7 +84,7 @@ test("loop: a pre-aborted signal runs no turns", async () => {
 });
 
 test("loop: a stop-guard ends the turn without dispatching tools", async () => {
-  const session = new Session({ id: "S", dir });
+  const session = new Session({ id: "S" });
   session.addUser("go");
   await loop({
     provider: fakeProvider([
@@ -105,7 +107,7 @@ test("loop: a stop-guard ends the turn without dispatching tools", async () => {
 });
 
 test("loop: a transient error falls down the model ladder and recovers (D15)", async () => {
-  const session = new Session({ id: "R", dir });
+  const session = new Session({ id: "R" });
   session.addUser("hi");
   const primary = fakeProvider([[{ type: "error", error: new Error("DeepSeek 429: too many requests") }, { type: "done", reason: "error" }]]);
   const fallback = fakeProvider([[{ type: "text", delta: "recovered" }, { type: "done", reason: "stop" }]]);
@@ -133,7 +135,7 @@ test("loop: a transient error falls down the model ladder and recovers (D15)", a
 });
 
 test("loop: backs off and retries the same candidate when there is no fallback (D15)", async () => {
-  const session = new Session({ id: "B", dir });
+  const session = new Session({ id: "B" });
   session.addUser("hi");
   const provider = fakeProvider([
     [{ type: "error", error: new Error("overloaded") }, { type: "done", reason: "error" }],
@@ -158,7 +160,7 @@ test("loop: backs off and retries the same candidate when there is no fallback (
 });
 
 test("loop: a non-transient error gives up via onError, no retry, nothing committed (D15)", async () => {
-  const session = new Session({ id: "E", dir });
+  const session = new Session({ id: "E" });
   session.addUser("hi");
   const provider = fakeProvider([[{ type: "error", error: new Error("DeepSeek 400: bad request") }, { type: "done", reason: "error" }]]);
   let captured: unknown = null;
@@ -181,7 +183,7 @@ test("loop: a non-transient error gives up via onError, no retry, nothing commit
 });
 
 test("loop: maxTurns caps a runaway tool-calling model", async () => {
-  const session = new Session({ id: "M", dir });
+  const session = new Session({ id: "M" });
   session.addUser("loop forever");
   // a provider that ALWAYS calls a readonly tool → would never stop on its own
   const alwaysCalls: Provider = {

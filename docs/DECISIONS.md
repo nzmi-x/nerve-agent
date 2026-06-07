@@ -711,6 +711,34 @@ light/dark choice); using the terminal's own ANSI colours (nerve needs specific 
 **Still needs a real-terminal eyeball** — the live in-place re-theme (toggle GNOME dark/light while nerve
 runs) and colour legibility (esp. light mode) can't be seen without a TTY.
 
+## D31 — Persistence on `bun:sqlite`: sessions in a per-project DB (not JSONL); skills/config stay files
+**Decision.** Runtime **state** moves from append-only JSONL to **SQLite via `bun:sqlite`** (built-in —
+zero external dep), one DB per project at `~/.nerve/projects/<slug>/nerve.db` (`src/db.ts`, cached
+connection, WAL). **Sessions** are the first (and currently only) resident: tables `sessions(id, title,
+created_at, updated_at)`, `messages(session_id, seq, role, content, reasoning, tool_calls, tool_call_id)`,
+`compactions(session_id, at, summary, first_kept)`. The `Session` **public API is unchanged** (loop.ts +
+surfaces untouched): `addUser`/`commitAssistant`/`addToolResult` INSERT a message row at the global ordinal
+(`seq`); resume = `SELECT … ORDER BY seq` with the latest compaction applied; lazy row on first write keeps
+[D27](#d27--lazy-session-file-no-empty-transcripts); title is a column ([D26](#d26--session-titles-auto-generated-from-the-first-exchange)); compaction inserts a marker and **never deletes** rows
+(so `first_kept` rebuilds the same shape, [D17](#d17--context-compaction-summarize-old-turns-on-demand-d17)). `listSessions`/`lastSessionId`/`sessionExists`/`deleteSession`
+(`src/sessions.ts`) are now indexed queries; `deleteSession` cascades via FK. **Token-tap telemetry is
+dropped** (it was JSONL `delta` lines, never read on resume — a row per token would bloat the DB).
+**What stays files (deliberately):** **skills** (filesystem markdown — the whole point of Claude-compat
+[D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude); a DB would break interop + your editing them) and **config** (`.env` keys, committed
+schema-validated `models.json`/`lsp.json`). SQLite is for *state*, not documents or config.
+**Why.** The user chose one Bun-native substrate for stored state. The wins: indexed session listing/search
+(replacing directory scans), a foundation for future text search (**FTS5**, built-in — no extension), and
+transactional integrity, all with no external dependency.
+**Rejected.** **Skills in SQLite** (breaks Claude-compat + file-editing — files are correct for documents);
+**a memory store** (the user maintains CLAUDE.md/DECISIONS.md + has session resume; auto-memory is a
+solution without a problem here — revisit only on a concrete cross-session-forgetting need); **sqlite-vec +
+codebase RAG** (grep/glob/**LSP** beat semantic retrieval for code — precise, structural, never stale —
+and sqlite-vec is a compiled native extension against the zero-dep ethos; if text search over sessions is
+ever wanted, use built-in **FTS5**, not embeddings); keeping JSONL (loses queryability + the unified
+substrate; the cat-able log is the only thing given up — an `/export` can restore it if wanted).
+**Phase.** Built (Phase 1.5), live-verified: fresh `~/.nerve` → headless run created
+`projects/<slug>/nerve.db` with the session row + both messages; full suite (155) green against SQLite.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

@@ -1,28 +1,23 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Session } from "../src/session.ts";
+import { Session, loadSession } from "../src/session.ts";
+import { sessionExists } from "../src/sessions.ts";
 import type { StreamEvent } from "../src/providers/types.ts";
 
-let dir: string;
+let home: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "nerve-session-"));
+  home = await mkdtemp(join(tmpdir(), "nerve-session-"));
+  process.env.NERVE_HOME = home; // each test gets its own per-project DB
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  delete process.env.NERVE_HOME;
+  await rm(home, { recursive: true, force: true });
 });
 
-function lines(s: Session): Record<string, unknown>[] {
-  return readFileSync(join(dir, `${s.id}.jsonl`), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
-
 test("accumulates a text+tool_call turn and commits an assistant message", async () => {
-  const s = new Session({ id: "t1", dir });
+  const s = new Session({ id: "t1" });
   s.addUser("make a file");
 
   const evs: StreamEvent[] = [
@@ -46,31 +41,29 @@ test("accumulates a text+tool_call turn and commits an assistant message", async
   await s.close();
 });
 
-test("persists msg lines (and only msg lines are canonical)", async () => {
-  const s = new Session({ id: "t2", dir });
+test("persists canonical messages as rows; telemetry tap is not persisted (D31)", async () => {
+  const s = new Session({ id: "t2" });
   s.addUser("hi");
-  s.tap({ type: "text", delta: "x" }); // telemetry — a delta line
+  s.tap({ type: "text", delta: "x" }); // telemetry — no-op, never stored
   s.apply({ type: "text", delta: "yo" });
   s.commitAssistant();
   s.addToolResult("c1", "ok");
   await s.close();
 
-  const all = lines(s);
-  expect(all.filter((l) => l.t === "delta")).toHaveLength(1);
-  const msgs = all.filter((l) => l.t === "msg");
-  expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
-  expect(msgs[2]).toEqual({ t: "msg", role: "tool", content: "ok", toolCallId: "c1" });
+  const { messages } = loadSession(process.cwd(), "t2");
+  expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+  expect(messages[2]).toEqual({ role: "tool", content: "ok", toolCallId: "c1" });
 });
 
-test("resume reloads prior messages from the msg lines", async () => {
-  const a = new Session({ id: "r1", dir });
+test("resume reloads prior messages from the DB", async () => {
+  const a = new Session({ id: "r1" });
   a.addUser("first");
   a.apply({ type: "text", delta: "reply" });
   a.commitAssistant();
-  a.tap({ type: "text", delta: "noise" }); // delta line must be ignored on resume
+  a.tap({ type: "text", delta: "noise" }); // no-op — nothing to ignore on resume
   await a.close();
 
-  const b = new Session({ id: "r1", dir, resume: true });
+  const b = new Session({ id: "r1", resume: true });
   expect(b.messages.map((m) => [m.role, m.content])).toEqual([
     ["user", "first"],
     ["assistant", "reply"],
@@ -79,20 +72,20 @@ test("resume reloads prior messages from the msg lines", async () => {
 });
 
 test("title (D26): setTitle persists; resume restores it", async () => {
-  const a = new Session({ id: "tt", dir });
+  const a = new Session({ id: "tt" });
   a.addUser("hi");
   a.setTitle("My Cool Session");
   await a.close();
 
-  const b = new Session({ id: "tt", dir, resume: true });
+  const b = new Session({ id: "tt", resume: true });
   expect(b.title).toBe("My Cool Session");
   await b.close();
 });
 
-test("lazy file (D27): no jsonl until the first write", async () => {
-  const s = new Session({ id: "lazy", dir });
-  expect(existsSync(join(dir, "lazy.jsonl"))).toBe(false); // opened the session but wrote nothing
+test("lazy session (D27): no row until the first write", async () => {
+  const s = new Session({ id: "lazy" });
+  expect(sessionExists(process.cwd(), "lazy")).toBe(false); // opened the session but wrote nothing
   s.addUser("now");
   await s.close();
-  expect(existsSync(join(dir, "lazy.jsonl"))).toBe(true);
+  expect(sessionExists(process.cwd(), "lazy")).toBe(true);
 });

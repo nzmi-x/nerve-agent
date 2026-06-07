@@ -1,6 +1,6 @@
 // nerve's global state lives under ~/.nerve, never in the project dir (D22) — so contribution repos
-// stay clean. Layout: ~/.nerve/{skills,commands,models.json,projects/<slug>/{sessions,skills,commands}}.
-// The project <slug> is the absolute cwd with '/' → '-' (Claude-compatible, collision-free).
+// stay clean. Layout: ~/.nerve/{skills,commands,models.json,projects/<slug>/{nerve.db,skills,commands}}.
+// Sessions live in the per-project `nerve.db` (D31). The <slug> is the absolute cwd with '/' → '-'.
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -17,11 +17,6 @@ export function projectSlug(cwd: string = process.cwd()): string {
 
 export function projectDir(cwd: string = process.cwd()): string {
   return join(nerveHome(), "projects", projectSlug(cwd));
-}
-
-/** This project's session transcripts (replaces the old in-repo ./.nerve/sessions). */
-export function sessionsDir(cwd: string = process.cwd()): string {
-  return join(projectDir(cwd), "sessions");
 }
 
 /** Skill discovery roots, most-specific first (callers dedup first-wins). Claude dirs + nerve dirs. */
@@ -59,10 +54,10 @@ export function ensureLayout(cwd: string = process.cwd()): void {
   for (const d of [
     join(nerveHome(), "skills"),
     join(nerveHome(), "commands"),
-    sessionsDir(cwd),
     join(projectDir(cwd), "skills"),
     join(projectDir(cwd), "commands"),
   ]) {
     mkdirSync(d, { recursive: true });
   }
+  // the project's nerve.db (sessions) is created lazily by openDb on first use (D31)
 }
