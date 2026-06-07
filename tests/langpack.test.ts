@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { langForFile, activePacks, langSkills, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
+import { langForFile, activePacks, langSkills, defaultSkills, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
 
 test("triagePrompt: presents the triage buckets + includes the check summaries", () => {
   const p = triagePrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
@@ -24,13 +24,21 @@ test("langForFile / activePacks: python + typescript by extension, deduped; othe
   expect(activePacks(["a.md", "b.txt"])).toEqual([]);
 });
 
-test("langSkills: loads pyrefly + ruff + prettier guidance with frontmatter stripped", async () => {
+test("langSkills: loads pyrefly + ruff + marimo + prettier guidance with frontmatter stripped", async () => {
   const text = await langSkills(LANGPACKS);
   expect(text).toContain("pyrefly");
   expect(text).toContain("ruff");
+  expect(text).toContain("marimo"); // notebooks ship with the python pack
   expect(text).toContain("prettier");
   expect(text).toContain("D24"); // tells the agent nerve auto-runs them
   expect(text).not.toContain("name: pyrefly"); // YAML frontmatter removed
+});
+
+test("defaultSkills: git-commit is always-on (loaded regardless of language), frontmatter stripped", async () => {
+  const text = await defaultSkills();
+  expect(text).toContain("Conventional Commit");
+  expect(text).toContain("feat");
+  expect(text).not.toContain("name: git-commit"); // YAML frontmatter removed
 });
 
 test("checkSummary: clean detection, noise filtered, issues passed through", () => {

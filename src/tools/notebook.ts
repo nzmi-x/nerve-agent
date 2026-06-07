@@ -6,6 +6,7 @@
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { TOOLCHAIN } from "../toolchain.ts";
 import type { Tool } from "./types.ts";
 
 const MAX_CELL_CHARS = 1500;
@@ -86,7 +87,7 @@ export const notebook: Tool = {
   readonly: false,
   async run(args, ctx) {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
-    if (!Bun.which("uv")) return "uv not installed — `curl -LsSf https://astral.sh/uv/install.sh | sh` (nerve runs marimo via uv).";
+    if (!Bun.which("uv")) return `marimo notebooks run via uv (which auto-provisions marimo) — uv not found. Install it: \`${TOOLCHAIN.uv}\``;
     const nb = resolve(ctx.cwd, args.path);
     if (!(await Bun.file(nb).exists())) return `Error: no such file: ${args.path}`;
 

@@ -566,9 +566,14 @@ and **TypeScript/JS** (a `prettier --write` fixer + a prettier skill; no checker
 reports diagnostics on edit). A missing tool surfaces a **chained install hint** (shared `installHint`
 in `src/toolchain.ts`: `uv tool install pyrefly`, `bun install -g prettier`, and "install bun/uv first"
 if the package manager itself is absent — D10/D24 use the same helper). Python's details:**
-- **Skills** — `skills/pyrefly/SKILL.md` + `skills/ruff/SKILL.md` (how to use them). **Hidden** (not in
-  `skillRoots`, so not in the `/` popup); their bodies are **injected into the system prompt** only once
-  Python is in play (progressive disclosure). So the agent learns the Python toolchain exactly when relevant.
+- **Skills** — `skills/pyrefly/SKILL.md` + `skills/ruff/SKILL.md` + `skills/marimo/SKILL.md` (how to use
+  them; marimo ships here because notebooks are Python). **Hidden** (not in `skillRoots`, so not in the
+  `/` popup); their bodies are **injected into the system prompt** only once Python is in play
+  (progressive disclosure). So the agent learns the Python toolchain exactly when relevant.
+- **Default (always-on) skills** — `defaultSkills()` injects `skills/git-commit/SKILL.md` into **every**
+  system prompt regardless of language (cached). It's the skill-equivalent of the caveman system rule
+  ([D21](#d21--communication-style-caveman-by-default-system-message-not-skill)): the agent should always
+  know nerve's Conventional-Commit conventions, so the guidance is shipped + always loaded, not on-demand.
 - **Post-edit hooks** — after an **editing turn** (EDIT mode), nerve auto-runs, on **just the `.py`
   files edited that turn**: `pyrefly infer` → `ruff check --select I --fix` → `ruff check --fix` →
   `ruff format` (the **fixers**, edit in place), then `pyrefly check` + `ruff check` (the **checkers**,

@@ -7,7 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
-import { activePacks, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
+import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
@@ -87,7 +87,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     langSkillText = await langSkills(packs);
     langSkillKey = key;
   }
-  const sys = packs.length && langSkillText ? `${systemPrompt()}\n\n${langSkillText}` : systemPrompt();
+  const sys = [systemPrompt(), await defaultSkills(), packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
   await loop({
     provider,
     session,

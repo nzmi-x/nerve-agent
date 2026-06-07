@@ -22,7 +22,7 @@ export const LANGPACKS: LangPack[] = [
   {
     id: "python",
     extensions: [".py", ".pyi"],
-    skillFiles: ["pyrefly/SKILL.md", "ruff/SKILL.md"],
+    skillFiles: ["pyrefly/SKILL.md", "ruff/SKILL.md", "marimo/SKILL.md"],
     fixers: [
       ["pyrefly", "infer"], // add basic type annotations (in place)
       ["ruff", "check", "--select", "I", "--fix"], // sort imports
@@ -100,6 +100,24 @@ export async function langSkills(packs: LangPack[]): Promise<string> {
     }
   }
   return parts.join("\n\n");
+}
+
+/**
+ * Skills appended to **every** system prompt, regardless of language (D24) — shipped, always-on, the
+ * skill-equivalent of the caveman system rule. `git-commit` lives here so the agent always knows our
+ * commit conventions. Cached (the files are static): read once, reused every turn.
+ */
+export const DEFAULT_SKILL_FILES = ["git-commit/SKILL.md"];
+let defaultSkillCache: string | null = null;
+export async function defaultSkills(): Promise<string> {
+  if (defaultSkillCache !== null) return defaultSkillCache;
+  const parts: string[] = [];
+  for (const f of DEFAULT_SKILL_FILES) {
+    const file = Bun.file(join(SKILLS_DIR, f));
+    if (await file.exists()) parts.push(stripFrontmatter(await file.text()));
+  }
+  defaultSkillCache = parts.join("\n\n");
+  return defaultSkillCache;
 }
 
 async function sh(cmd: string[], cwd: string): Promise<string> {

@@ -15,7 +15,11 @@ native, [D24](../DECISIONS.md).
 - **Skills** (`activePacks` → `langSkills`): the pack's `SKILL.md` bodies (frontmatter stripped) are
   **appended to the system prompt** once its language is active (cached). They live under `skills/`,
   **not** `skillRoots` — so they're hidden from the `/` popup until needed (progressive disclosure).
-  First injection is the turn *after* the first touch (the prompt is fixed per turn).
+  First injection is the turn *after* the first touch (the prompt is fixed per turn). Python ships
+  pyrefly + ruff + **marimo** (notebooks are `.py`).
+- **Default (always-on) skills** (`defaultSkills`, `DEFAULT_SKILL_FILES`): `skills/git-commit/SKILL.md`
+  is injected into **every** system prompt regardless of language (cached once) — the skill-equivalent
+  of the caveman rule. Add an always-on skill = add a file to `DEFAULT_SKILL_FILES`.
 - **Post-edit hooks** (`runHooks`): after an **EDIT-mode** turn that edited files of the pack, nerve runs
   the **fixers** (edit in place) then the **checkers** (report) on just those files, and prints a
   `⚙ post-edit hooks (<lang>)` summary. Python: `pyrefly infer` → `ruff check --select I --fix` →

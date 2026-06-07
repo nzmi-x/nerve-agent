@@ -31,7 +31,7 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
-import { activePacks, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
+import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
 import type { Mode } from "../dispatch.ts";
@@ -587,7 +587,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       langSkillText = await langSkills(packs);
       langSkillKey = key;
     }
-    const sys = packs.length && langSkillText ? `${system}\n\n${langSkillText}` : system;
+    const sys = [system, await defaultSkills(), packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
     const edited = new Set<string>();
     const ac = new AbortController();
     turnAbort = ac;
