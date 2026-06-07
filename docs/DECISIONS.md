@@ -652,6 +652,31 @@ summarization of the page (the agent reads the Markdown directly — leaner, no 
 methods (read-only for now). **Refine later:** swap the regex converter for Bun's `HTMLRewriter` if quality demands.
 **Phase.** Built, live-verified (example.com → Markdown).
 
+## D29 — Responsive TUI: main column + collapsible sidebar (web-app mindset)
+**Decision.** The TUI root is a flex **row**, not a column: a **`mainCol`** (`flexGrow:1`, `minWidth:0`)
+holding the existing stack (transcript · todo panel · popup · input · status bar) plus a fixed-width
+(**34-col**) **`sidebar`** beside it with two stacked bordered panels — **session** (title · model · mode
+badge · cost · ctx · balance, mirroring the status bar) and **files** (the session's touched files,
+most-recent first; `✎` = written/edited, `·` = read-only). The sidebar **collapses on `Ctrl+B`** and
+**auto-hides** when the terminal is narrower than **100 cols** (the main column needs the room) — re-checked
+on a guarded `renderer.on("resize")`. Both panels use the proven **fixed-pool-of-`TextRenderable`-rows**
+pattern (like the todo panel, [D25](#d25--a-todo-tool-with-a-pinned-colored-tui-panel)); the files pool is
+capped to the terminal height so it never overflows. `renderSidebar()` is a **no-op while hidden**, and the
+files panel is fed by the same `langTouched`/`sessionEdited` sets the language packs already track —
+**zero new bookkeeping in the engine**. State resets with the session (`/drop`, `/resume`).
+**Why.** The user wanted a "web-app mindset" — surface what matters (live session economics + what's been
+touched) in flexible panels that adapt to full / half / quarter-screen widths, collapsible to a single
+column. OpenTUI's flexbox makes this a layout change, not an engine change: the row + `flexGrow`/`minWidth`
+do the responsiveness; the engine (loop/providers/session) is untouched.
+**Rejected.** A reactive React/Solid binding (the imperative core + a `renderSidebar()` on the existing
+update points is enough — no new runtime); one multi-line `TextRenderable` per panel (the fixed-row pool is
+the codebase's proven, height-exact pattern); a `ScrollBox` for files (height-capping the pool is simpler
+and overflow-safe); persisting touched-file history across `/resume` (we don't replay tool calls — the panel
+starts empty and refills as the agent works).
+**Phase.** Built (Phase 1.5). **Needs live verification in a real terminal** — typecheck validates the
+OpenTUI props but there's no TTY in the build env, so the visual layout (panel sizing, breakpoint, toggle)
+must be eyeballed. Add a panel = another bordered box + a pooled-row render in the sidebar block of `app.ts`.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

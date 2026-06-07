@@ -1,16 +1,26 @@
 # tui
 
-**Status:** built (Phase 1). Base layout verified in a real terminal; affordances/status need a verify pass.
-**What:** the interactive terminal UI — transcript, autosuggest row, status line, and an input with
-`@`/`!`/`/` affordances + an interactive `ask_user` picker.
+**Status:** built (Phase 1; sidebar D29 Phase 1.5). Base layout verified in a real terminal; the
+**responsive sidebar + affordances/status need a verify pass** (no TTY in the build env).
+**What:** the interactive terminal UI — a main column (transcript, autosuggest row, status line, input
+with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsible sidebar.
 **Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)).
 
 **How it works:**
-- Paneled layout (Tokyo-Night palette): a **bordered transcript** `Box` (rounded, title " ◆ nerve ")
-  wrapping a `ScrollBox` (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned,
-  colored `☑ todos`, updated in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a
-  `popup` `Box` (autosuggest **or** ask picker, per-row bg highlight) · a **bordered input** `Box`
-  (`❯` prompt + `Input`) · a styled status bar.
+- **Responsive row layout** ([D29](../DECISIONS.md), Tokyo-Night palette): the root is a flex **row** —
+  a **`mainCol`** (`flexGrow:1`, `minWidth:0`) holding the stack below, plus a fixed **34-col sidebar**.
+- Main column: a **bordered transcript** `Box` (rounded, title " ◆ &lt;title&gt; ") wrapping a `ScrollBox`
+  (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
+  in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a `popup` `Box` (autosuggest
+  **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
+  status bar.
+- **Sidebar** ([D29](../DECISIONS.md)): two stacked bordered panels — **session** (title · model · mode
+  badge · cost · ctx · balance, mirroring the status bar) and **files** (this session's touched files,
+  most-recent first; `✎` = written/edited, `·` = read-only). Built from the same fixed-pool-of-rows
+  pattern as the todo panel; the files pool is height-capped so it never overflows. **`Ctrl+B`** toggles
+  it; it **auto-hides below 100 cols** (guarded `renderer.on("resize")`). `renderSidebar()` is a no-op
+  while hidden and is driven off `setStatus()` + the per-turn `langTouched`/`sessionEdited` sets — no
+  engine bookkeeping. Resets with the session (`/drop`, `/resume`).
 - **Assistant answers render as markdown** — a streaming `MarkdownRenderable` (`SyntaxStyle` from the
   palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
   `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are
@@ -39,8 +49,8 @@
 - **Keys:** Enter with a popup open **accepts the highlighted suggestion** before acting — a `/`
   command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
   and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
-  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **Ctrl+R reload** · ESC stop ·
-  Ctrl+C quit. (`/exit` aliases `/quit`.)
+  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **Ctrl+B sidebar** · **Ctrl+R reload** ·
+  ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.)
 
 **How to change it:**
 - The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;
@@ -53,6 +63,10 @@
 - Interactive rendering isn't unit-testable — verify in a real terminal (`bun index.ts`). Watch:
   Tab-accept (if the Input eats Tab, switch to a consumed input handler), the popup row when empty
   (should be 0 height), and the ask picker blocking.
+- **Sidebar (D29) needs a live pass:** confirm the main column keeps full width/usability with the
+  sidebar hidden and on a narrow (<100-col) terminal; that the session/files panels size correctly and
+  the files pool clips (no overflow past the bottom); that `Ctrl+B` toggles and resize re-applies the
+  breakpoint. A non-TTY run falls back to **headless**, so the TUI path can't be exercised in the build env.
 - ESC latency differs by terminal (Kitty protocol) — crisp in Ghostty, timing-based in VS Code.
 
 **See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [affordances/D14](../DECISIONS.md) · [usage](usage.md) · [balance](balance.md)

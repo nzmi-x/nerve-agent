@@ -1,9 +1,10 @@
-// The interactive terminal UI (OpenTUI imperative core). Paneled layout: a bordered transcript that
-// renders assistant output as markdown, an autosuggest/ask popup with row highlighting, a bordered
-// input, and a styled status bar (model · mode · cost · context · balance). Affordances: @file, !shell,
-// /command + an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
+// The interactive terminal UI (OpenTUI imperative core). Responsive layout (D29): a flex *row* — a main
+// column (bordered markdown transcript, todo panel, autosuggest/ask popup, bordered input, status bar:
+// model · mode · cost · context · balance) plus a collapsible sidebar (session + files panels). The
+// sidebar toggles on Ctrl+B and auto-hides on narrow terminals. Affordances: @file, !shell, /command +
+// an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
 import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   createCliRenderer,
   BoxRenderable,
@@ -85,7 +86,7 @@ type Content = string | ReturnType<typeof t>;
 const HELP = [
   "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · Ctrl+R reload · ESC stop · Ctrl+C quit",
+  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
 ].join("\n");
 
 export interface TuiOptions {
@@ -144,7 +145,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
 
   // --- layout ---------------------------------------------------------------
-  const root = new BoxRenderable(renderer, { id: "root", width: "100%", height: "100%", flexDirection: "column", padding: 0 });
+  // Web-app mindset (D29): a flex *row* — the main column (transcript/input/status) grows to fill, and a
+  // fixed-width sidebar sits beside it (session + files panels). The sidebar collapses on Ctrl+B and
+  // auto-hides when the terminal is too narrow to spare the columns. `minWidth: 0` lets the main column
+  // shrink so the fixed sidebar always gets its width (flexbox won't overflow it).
+  const root = new BoxRenderable(renderer, { id: "root", width: "100%", height: "100%", flexDirection: "row", padding: 0 });
+  const mainCol = new BoxRenderable(renderer, { id: "mainCol", flexGrow: 1, height: "100%", flexDirection: "column", minWidth: 0 });
   const transcriptBox = new BoxRenderable(renderer, {
     id: "transcriptBox",
     flexGrow: 1,
@@ -179,11 +185,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: PANEL });
 
-  root.add(transcriptBox);
-  root.add(todoBox);
-  root.add(popup);
-  root.add(inputBox);
-  root.add(status);
+  // The responsive sidebar (populated in the sidebar block below); created here so it joins the row.
+  const sidebar = new BoxRenderable(renderer, { id: "sidebar", flexShrink: 0, width: 0, height: "100%", flexDirection: "column", paddingLeft: 1 });
+  mainCol.add(transcriptBox);
+  mainCol.add(todoBox);
+  mainCol.add(popup);
+  mainCol.add(inputBox);
+  mainCol.add(status);
+  root.add(mainCol);
+  root.add(sidebar);
   renderer.root.add(root);
   input.focus();
 
@@ -215,6 +225,68 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     todoBox.height = rows.length;
   };
+
+  // --- responsive sidebar (D29): session + files panels; Ctrl+B toggles, narrow terminals auto-hide ---
+  const SIDEBAR_W = 34;
+  const SIDEBAR_MIN = 100; // below this terminal width the main column needs the room — sidebar hides
+  const W = SIDEBAR_W - 4; // inner text width (border + padding)
+  let sidebarOn = true;
+  const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
+  const sessionPanel = new BoxRenderable(renderer, { id: "sessionPanel", flexShrink: 0, border: true, borderStyle: "rounded", borderColor: BORDER, title: " session ", paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
+  const filesPanel = new BoxRenderable(renderer, { id: "filesPanel", flexGrow: 1, border: true, borderStyle: "rounded", borderColor: BORDER, title: " files ", paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
+  sidebar.add(sessionPanel);
+  sidebar.add(filesPanel);
+  const SESSION_ROWS = 7; // title, blank, model, mode, cost, ctx, bal
+  const sessionRows: TextRenderable[] = [];
+  for (let i = 0; i < SESSION_ROWS; i++) {
+    const tr = new TextRenderable(renderer, { id: `sess-${i}`, content: "", height: 1 });
+    sessionPanel.add(tr);
+    sessionRows.push(tr);
+  }
+  sessionPanel.height = SESSION_ROWS + 2; // + border
+  const FILE_ROWS = 40;
+  const fileRows: TextRenderable[] = [];
+  for (let i = 0; i < FILE_ROWS; i++) {
+    const tr = new TextRenderable(renderer, { id: `file-${i}`, content: "", height: 0 });
+    filesPanel.add(tr);
+    fileRows.push(tr);
+  }
+  function renderSidebar(): void {
+    if (sidebar.width === 0) return; // hidden — skip the work
+    const s = meter.snapshot();
+    sessionRows[0]!.content = t`${bold(fg(CYAN)(trunc(session.title || "untitled", W)))}`;
+    sessionRows[1]!.content = "";
+    sessionRows[2]!.content = t`${fg(MUTE)("model ")}${fg(FG)(trunc(active.id, W - 6))}`;
+    sessionRows[3]!.content = mode === "edit" ? t`${fg(MUTE)("mode  ")}${bg(GREEN)(fg(DARKFG)(" EDIT "))}` : t`${fg(MUTE)("mode  ")}${bg(YELLOW)(fg(DARKFG)(" PLAN "))}`;
+    sessionRows[4]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
+    sessionRows[5]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
+    sessionRows[6]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
+    // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
+    const files = [...langTouched].reverse();
+    const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - (SESSION_ROWS + 5)));
+    for (let i = 0; i < fileRows.length; i++) {
+      const tr = fileRows[i]!;
+      if (i < Math.min(files.length, cap)) {
+        const f = files[i]!;
+        const name = trunc(relative(cwd, f) || f, W - 2);
+        tr.content = sessionEdited.has(f) ? t`${fg(YELLOW)("✎")} ${fg(FG)(name)}` : t`${fg(DIM)("·")} ${fg(MUTE)(name)}`;
+        tr.height = 1;
+      } else if (i === 0) {
+        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.height = 1;
+      } else {
+        tr.content = "";
+        tr.height = 0;
+      }
+    }
+  }
+  function applySidebar(): void {
+    const visible = sidebarOn && renderer.width >= SIDEBAR_MIN;
+    sidebar.width = visible ? SIDEBAR_W : 0;
+    if (visible) renderSidebar();
+  }
+  // Re-evaluate the breakpoint when the terminal resizes (guarded — older cores may not emit it).
+  (renderer as { on?: (e: string, cb: () => void) => void }).on?.("resize", () => applySidebar());
 
   // --- transcript -----------------------------------------------------------
   const lineIds: string[] = [];
@@ -341,6 +413,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const s = meter.snapshot();
     const badge = mode === "edit" ? bg(GREEN)(fg(DARKFG)(" EDIT ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
     status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? fg(YELLOW)("   ● streaming") : ""}`;
+    renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
   const toggleMode = (): void => {
@@ -427,6 +500,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       if (title) {
         session.setTitle(title);
         transcriptBox.title = ` ◆ ${title} `;
+        renderSidebar(); // show the new title in the session panel
       }
     } catch {
       /* title is best-effort */
@@ -445,6 +519,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     session = new Session({});
     meter = new UsageMeter();
+    langTouched.clear(); // fresh session: empty the files panel + reset language packs
+    sessionEdited.clear();
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
@@ -461,6 +537,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     await session.close();
     session = new Session({ id, resume: true });
     meter = new UsageMeter();
+    langTouched.clear(); // we don't replay tool calls — the files panel starts empty for the resumed session
+    sessionEdited.clear();
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
@@ -636,6 +714,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     } finally {
       answer.streaming = false;
       turnAbort = null;
+      for (const f of edited) sessionEdited.add(f); // sidebar: these files were written/edited this session
+      renderSidebar(); // refresh the files panel (langTouched grew during the turn)
     }
     if (ac.signal.aborted) return; // user hit ESC — skip hooks + auto-fix
 
@@ -709,6 +789,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (key.ctrl && key.name === "c") return void shutdown();
     if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
+    if (key.ctrl && key.name === "b") {
+      sidebarOn = !sidebarOn;
+      applySidebar();
+      addText(t`${fg(MUTE)(`sidebar ${sidebarOn ? (renderer.width >= SIDEBAR_MIN ? "shown" : "on (terminal too narrow to show)") : "hidden"}`)}`);
+      return;
+    }
 
     if (asking) {
       if (key.name === "up") {
@@ -752,7 +838,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
-  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help")}`);
+  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help · Ctrl+B sidebar")}`);
+  applySidebar(); // size the sidebar to the current terminal width (and render it if it fits)
   setStatus();
   void refreshBalance();
 }
