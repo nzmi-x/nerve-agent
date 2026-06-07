@@ -42,6 +42,8 @@ export interface LoopOptions {
   /** Runaway guard — max tool-calling round-trips. */
   maxTurns?: number;
   onEvent?: (ev: StreamEvent) => void;
+  /** A tool is about to be dispatched (before its result) — lets a surface show it as in-flight. */
+  onToolStart?: (name: string) => void;
   onToolResult?: (name: string, result: string) => void;
   /** A transient failure is being retried (fallback or backoff). `delayMs:0` = ladder switch. */
   onRetry?: (info: { attempt: number; delayMs: number; model: string; error: unknown }) => void;
@@ -132,6 +134,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
     if (!calls || calls.length === 0) return; // the model answered without calling a tool — done
 
     for (const call of calls) {
+      opts.onToolStart?.(call.name);
       const result = await dispatch(call.name, parseArgs(call.args), opts.mode, opts.ctx);
       opts.session.addToolResult(call.id, result);
       opts.onToolResult?.(call.name, result);

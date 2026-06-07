@@ -11,7 +11,8 @@ dispatch until the model stops calling tools.
 - Per turn: build a neutral `ProviderRequest` from `session.messages` → `provider.stream(req, signal)`
   → `pipe(source, interceptors, ac)` → `session.apply(ev)` (+ `onEvent`) → `commitAssistant()`.
 - If the committed assistant turn has tool calls: `dispatch(name, args, mode, ctx)` each (mode-gated),
-  `session.addToolResult(...)` (+ `onToolResult`), and loop again. No tool calls → done.
+  `session.addToolResult(...)` (+ `onToolStart` before each dispatch / `onToolResult` after), and loop
+  again. No tool calls → done.
 - **One `AbortController` per turn** carries both ESC (`opts.signal`) and a `stopGuard`'s `ctl.abort()`;
   it's the signal the provider fetch and the pipeline watch. An aborted turn commits its partial
   message and stops (no dispatch).

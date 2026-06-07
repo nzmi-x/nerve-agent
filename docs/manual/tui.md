@@ -21,14 +21,16 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels — **session** (title · model · mode badge ·
   cost · ctx · balance, mirroring the status bar), **skills** (the skills *loaded into context now* —
-  always-on defaults + active language packs via `activeSkillNames`), **subagents** (this session's `task`
-  runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md); panel height 0 when none), and **files** (touched files,
+  always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
+  this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
+  session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and **files** (touched files,
   most-recent first; `✎` written, `·` read-only — `flexGrow` fills the rest). All use the same
-  fixed-pool-of-rows pattern as the todo panel; the files pool is height-capped (accounting for the other
+  fixed-pool-of-rows pattern as the todo panel; each compact panel keeps a **`(none …)` placeholder** when
+  empty (so it never collapses to a thin border), and the files pool is height-capped (subtracting the other
   panels) so it never overflows. **`Ctrl+B`** toggles the sidebar; it **auto-hides below 100 cols** (guarded
   `renderer.on("resize")`). `renderSidebar()` is a no-op while hidden, driven off `setStatus()` + the
-  per-turn `langTouched`/`sessionEdited` sets + the `onSubagent` hook (the `task` tool reports start/end) —
-  no engine bookkeeping. Resets with the session (`/drop`, `/resume`).
+  per-turn `langTouched`/`sessionEdited`/`toolCalls`/`subagents` state — no engine bookkeeping beyond the
+  loop's tool hooks. Resets with the session (`/drop`, `/resume`).
 - **Assistant answers render as markdown** — a streaming `MarkdownRenderable` (`SyntaxStyle` from the
   palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
   `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are

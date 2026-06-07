@@ -227,6 +227,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let sidebarOn = true;
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
   const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
+  const toolCalls: { name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
   const mkPanel = (id: string, title: string, grow = false): BoxRenderable =>
     new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: BORDER, title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
   const mkRows = (panel: BoxRenderable, n: number, prefix: string, h: number): TextRenderable[] => {
@@ -240,18 +241,18 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
   const sessionPanel = mkPanel("sessionPanel", " session ");
   const skillsPanel = mkPanel("skillsPanel", " skills ");
+  const toolsPanel = mkPanel("toolsPanel", " tools ");
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ");
   const filesPanel = mkPanel("filesPanel", " files ", true);
-  sidebar.add(sessionPanel);
-  sidebar.add(skillsPanel);
-  sidebar.add(subagentsPanel);
-  sidebar.add(filesPanel);
+  for (const p of [sessionPanel, skillsPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
   const SESSION_ROWS = 7; // title, blank, model, mode, cost, ctx, bal
   const SKILL_ROWS = 6;
+  const TOOL_ROWS = 6;
   const SUB_ROWS = 6;
   const FILE_ROWS = 40;
   const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
   const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
+  const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
   const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
   const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
   sessionPanel.height = SESSION_ROWS + 2; // + border
@@ -279,7 +280,26 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     skillsPanel.height = skills.length + 2;
 
-    // subagents panel: this session's `task` delegations + status (● running · ✓ done · ✗ failed). Hidden when none (D6).
+    // tools panel: the main agent's tool calls this session + status (● running · ✓ ok · ✗ error).
+    const toolWin = toolCalls.slice(-TOOL_ROWS);
+    for (let i = 0; i < toolRows.length; i++) {
+      const tr = toolRows[i]!;
+      if (i < toolWin.length) {
+        const tc = toolWin[i]!;
+        const icon = tc.status === "running" ? fg(YELLOW)("●") : tc.status === "ok" ? fg(GREEN)("✓") : fg(RED)("✗");
+        tr.content = t`${icon} ${fg(FG)(trunc(tc.name, W - 2))}`;
+        tr.height = 1;
+      } else if (i === 0) {
+        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.height = 1;
+      } else {
+        tr.content = "";
+        tr.height = 0;
+      }
+    }
+    toolsPanel.height = Math.max(1, toolWin.length) + 2;
+
+    // subagents panel: this session's `task` delegations + status (● running · ✓ done · ✗ failed).
     const subWin = subagents.slice(-SUB_ROWS);
     for (let i = 0; i < subagentRows.length; i++) {
       const tr = subagentRows[i]!;
@@ -288,16 +308,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         const icon = sa.status === "running" ? fg(YELLOW)("●") : sa.status === "done" ? fg(GREEN)("✓") : fg(RED)("✗");
         tr.content = t`${icon} ${fg(MUTE)(trunc(sa.prompt, W - 2))}`;
         tr.height = 1;
+      } else if (i === 0) {
+        tr.content = t`${fg(DIM)("(none)")}`;
+        tr.height = 1;
       } else {
         tr.content = "";
         tr.height = 0;
       }
     }
-    subagentsPanel.height = subWin.length ? subWin.length + 2 : 0;
+    subagentsPanel.height = Math.max(1, subWin.length) + 2;
 
     // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
     const files = [...langTouched].reverse();
-    const usedAbove = SESSION_ROWS + 2 + (skills.length + 2) + (subWin.length ? subWin.length + 2 : 0) + 2;
+    const usedAbove = SESSION_ROWS + 2 + (skills.length + 2) + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
     const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
@@ -388,6 +411,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     inputBox.borderColor = BORDER;
     sessionPanel.borderColor = BORDER;
     skillsPanel.borderColor = BORDER;
+    toolsPanel.borderColor = BORDER;
     subagentsPanel.borderColor = BORDER;
     filesPanel.borderColor = BORDER;
     status.bg = PANEL;
@@ -646,6 +670,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     langTouched.clear(); // fresh session: empty the files panel + reset language packs
     sessionEdited.clear();
     subagents.length = 0;
+    toolCalls.length = 0;
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
@@ -665,6 +690,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     langTouched.clear(); // we don't replay tool calls — the files panel starts empty for the resumed session
     sessionEdited.clear();
     subagents.length = 0;
+    toolCalls.length = 0;
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
@@ -840,7 +866,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
             setStatus();
           }
         },
+        onToolStart: (name) => {
+          toolCalls.push({ name, status: "running" }); // sidebar tools panel: in-flight ●
+          renderSidebar();
+        },
         onToolResult: (name, result) => {
+          const tc = [...toolCalls].reverse().find((c) => c.status === "running");
+          if (tc) tc.status = result.startsWith("Error") ? "err" : "ok"; // ✓ / ✗
+          renderSidebar();
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
           addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);
         },
