@@ -788,11 +788,34 @@ but correct even for a PLAN-safe read command); OS threads (needless — async c
 (`pickTheme`→`theme.ts:81`, `runSubagent`→`subagent.ts:33`); unit test asserts read-only interleave +
 mutating serialize + call-order results (`tests/loop.test.ts`).
 
+## D33 — A `search` tool: DuckDuckGo lite, a thin sibling of `fetch`
+**Decision.** A `search` tool for when the agent has **no URL to go on**. It GETs
+`https://lite.duckduckgo.com/lite/?q=<query>` — DDG's minimal, **JS-free** HTML endpoint — and parses the
+result rows into a ranked **`{title, url, snippet}`** list (`parseResults`, pure/tested): it pulls the
+`result-link` anchors + `result-snippet` cells, **unwraps DDG's `/l/?uddg=` redirect** to the real URL, and
+reuses `fetch`'s entity `decode`. The agent then `fetch`es a chosen URL to read the page — search finds,
+fetch reads. `query` required, optional `max` (default 8, cap 20). `readonly:true` (a GET → PLAN-safe) and
+it's in the **subagent** toolset, so research subagents can search too. Built on the same Bun-native `fetch`
+primitive as [D28](#d28--a-fetch-tool-bun-native-html--markdown) (15s timeout, browser UA, follows redirects).
+**Why.** The agent could read a URL ([D28](#d28--a-fetch-tool-bun-native-html--markdown)) but couldn't
+**find** one — it had to be handed links. Real coding tasks need to look up current docs/errors/APIs. The
+**lite** endpoint is the leanest path: no API key, no JS, tiny HTML that parses with a few regexes — no new
+deps, fits the zero-dep ethos.
+**Rejected.** The DDG **HTML/JSON Instant-Answer APIs** (heavier markup / sparse coverage); a paid search
+API or a key-bearing engine (key management, cost — against the `.env`-only, lean ethos); scraping the full
+JS DDG/Google (needs a headless browser). Routing search **through** the `fetch` tool's `htmlToMarkdown`
+(loses the result structure — a dedicated parser yields a clean ranked list). **Refine later:** a `region`/
+time filter, or a fallback engine if DDG lite blocks.
+**Phase.** Built (Phase 1.5), live-verified (`bun javascript runtime` → bun.sh + GitHub + docs, redirects
+unwrapped); `parseResults` unit-tested offline (`tests/search.test.ts`).
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
-  `Ctrl+C` exits the app.
+  `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while
+  a turn runs; `ESC` flips it to red `stopping…` immediately and it vanishes when the turn ends, so the
+  user can tell working vs. interrupting vs. stopped (a static indicator couldn't show liveness).
 - **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch));
   plain `Tab` also toggles it **when no autosuggest popup is open** (popup-`Tab` accepts the suggestion).
   **Startup default is PLAN** (read-only — safer first contact); `--mode edit` opts into EDIT from launch.
