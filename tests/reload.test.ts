@@ -24,6 +24,6 @@ test("reloadTools: returns the full Phase-1 tool set", async () => {
   const res = await reloadTools();
   expect(res.ok).toBe(true);
   if (res.ok) {
-    expect(res.names).toEqual(["read", "write", "edit", "bash", "ls", "grep", "glob", "manual", "ask_user", "lsp", "notebook", "todo", "fetch", "task"]);
+    expect(res.names).toEqual(["read", "write", "edit", "bash", "ls", "grep", "glob", "manual", "ask_user", "lsp", "notebook", "todo", "fetch", "search", "task"]);
   }
 });

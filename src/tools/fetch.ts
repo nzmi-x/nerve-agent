@@ -11,7 +11,7 @@ const ENT: Record<string, string> = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–",
   hellip: "…", rsquo: "'", lsquo: "'", ldquo: '"', rdquo: '"', copy: "©", reg: "®", trade: "™", deg: "°",
 };
-function decode(s: string): string {
+export function decode(s: string): string {
   return s.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, e: string) => {
     if (e[0] === "#") {
       const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);

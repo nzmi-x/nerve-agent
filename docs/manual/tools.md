@@ -1,6 +1,6 @@
 # tools
 
-**Status:** built (Phase 1.5) — read, write, edit, bash, ls, grep, glob, manual, ask_user, **lsp** ([D10](../DECISIONS.md), see [lsp](lsp.md)), **notebook** ([D23](../DECISIONS.md), see [marimo](marimo.md)), todo, fetch, **task** ([D6](../DECISIONS.md) subagent)
+**Status:** built (Phase 1.5) — read, write, edit, bash, ls, grep, glob, manual, ask_user, **lsp** ([D10](../DECISIONS.md), see [lsp](lsp.md)), **notebook** ([D23](../DECISIONS.md), see [marimo](marimo.md)), todo, fetch, **search** ([D33](../DECISIONS.md)), **task** ([D6](../DECISIONS.md) subagent)
 **What:** the local tool set the model calls. Each is a plain object run as a direct Bun call —
 no daemon, no RPC. The registry exposes them to the providers and to the dispatcher.
 **Code:** `src/tools/types.ts` (the `Tool` contract) · `src/tools/registry.ts` · `src/tools/*.ts`
@@ -41,6 +41,11 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `fetch` ([D28](../DECISIONS.md)) — Bun-native HTTP GET of a URL → **HTML to Markdown**, JSON
   pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Caps timeout/
   size; skips binary. Export is `fetchTool` (avoids shadowing global `fetch`).
+- `search` ([D33](../DECISIONS.md)) — a thin sibling of `fetch` for when there's **no URL**: GETs
+  `lite.duckduckgo.com/lite/?q=…` (minimal JS-free HTML) and parses the rows into a ranked
+  `{title, url, snippet}` list; the agent then `fetch`es a result to read it. Unwraps DDG's `/l/?uddg=`
+  redirect to the real URL; reuses fetch's entity `decode`. `parseResults` is pure/tested. `readonly` →
+  PLAN-safe; included in the subagent toolset.
 - `task` ([D6](../DECISIONS.md)) — **delegate to a subagent**: runs the loop on a fresh **ephemeral**
   session (`src/subagent.ts`), **read-only** (PLAN mode), with the registry's `readonly` tools **minus
   `task`/`askUser`/`todo`** (no recursion, no human), on the `subagent`-flagged cheap model, returning
