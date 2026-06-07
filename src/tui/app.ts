@@ -25,7 +25,7 @@ import { loop } from "../loop.ts";
 import * as interceptorsMod from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
 import { reloadTools, toolSpecs } from "../tools/registry.ts";
-import { selectModel, providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
+import { providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, type CommandInfo, type Skill } from "./affordances.ts";
@@ -431,6 +431,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (i >= 0) lines.splice(i, 1);
   };
   const spacer = (): void => void addText(() => "");
+  // Consistent, color-coded system lines: info (· dim), ok (✦ magenta), warn (⚠ yellow), err (✗ red).
+  const sysInfo = (msg: string): void => void addText(() => t`${fg(DIM)("·")} ${fg(MUTE)(msg)}`);
+  const sysOk = (msg: string): void => void addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(msg)}`);
+  const sysWarn = (msg: string): void => void addText(() => t`${fg(YELLOW)("⚠")} ${fg(MUTE)(msg)}`);
+  const sysErr = (msg: string): void => void addText(() => t`${fg(RED)("✗")} ${fg(RED)(msg)}`);
   const clearTranscript = (): void => {
     for (const l of lines) transcript.remove(l.el.id);
     lines.length = 0;
@@ -646,17 +651,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     try {
       addPlain(await bash.run({ command: c }, { cwd }), () => MUTE); // full authority, ungated, not added to the session
     } catch (e) {
-      addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
+      sysErr(e instanceof Error ? e.message : String(e));
     }
   }
 
   // D17: summarize old turns into one message to reclaim context. Manual for now; ESC cancels.
   const KEEP_TOKENS = 20_000;
-  async function compact(focus: string): Promise<void> {
+  async function compact(): Promise<void> {
     if (busy) return;
     const cut = pickCutPoint(session.messages, KEEP_TOKENS);
     if (cut < 2) {
-      addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)("nothing old enough to compact yet")}`);
+      sysInfo("nothing old enough to compact yet");
       return;
     }
     busy = true;
@@ -666,7 +671,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     try {
       const input = pruneToolOutputs(session.messages.slice(0, cut)).messages; // shrink the summarizer's input
       const keep = session.messages.length - cut;
-      const summary = await summarize(provider, active.id, input, compactionPrompt, focus, turnAbort.signal);
+      const summary = await summarize(provider, active.id, input, compactionPrompt, "", turnAbort.signal);
       session.compact(summary, keep);
       setText(note, () => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`);
     } catch (e) {
@@ -692,7 +697,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     if (rt.ok) tools = toolSpecs(); // refresh provider-facing specs for the next turn
     if (rt.ok && !icErr) addText(() => t`${fg(GREEN)("↻")} ${fg(MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
-    else addPlain(`✗ reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`, () => RED);
+    else sysErr(`reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`);
   }
 
   // D26: auto-title the session from its first exchange (best-effort, async, non-blocking). The title
@@ -729,7 +734,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
-    addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
+    sysOk(`dropped ${old} · new session ${session.id}`);
     setStatus();
   }
 
@@ -737,8 +742,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function resumeSession(idArg?: string): Promise<void> {
     if (busy) return;
     const id = idArg ?? lastSessionId(cwd, session.id);
-    if (!id) return void addPlain("no other session to resume", () => MUTE);
-    if (!sessionExists(cwd, id)) return void addPlain(`✗ no session '${id}'`, () => RED);
+    if (!id) return void sysInfo("no other session to resume");
+    if (!sessionExists(cwd, id)) return void sysErr(`no session '${id}'`);
     await session.close();
     session = new Session({ id, resume: true, cwd });
     meter = new UsageMeter();
@@ -749,25 +754,25 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
-    addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`)}`);
+    sysOk(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`);
     setStatus();
   }
 
   // /sessions — an interactive picker: ↑/↓ navigate · Enter resume · d delete · Esc close.
   function sessionsCommand(): void {
     const list = listSessions(cwd);
-    if (!list.length) return void addPlain("no sessions yet", () => MUTE);
+    if (!list.length) return void sysInfo("no sessions yet");
     openPicker({
       title: "sessions · ↑/↓ · Enter resume · d delete · Esc close",
       items: list.map((s) => ({ label: s.title || s.preview || s.id, desc: `${s.msgs} msg · ${rel(s.mtimeMs)}`, current: s.id === session.id })),
       onPick: (i) => {
         const s = list[i]!;
-        if (s.id === session.id) return void addPlain("already on this session", () => MUTE);
+        if (s.id === session.id) return void sysInfo("already on this session");
         void resumeSession(s.id);
       },
       onDelete: (i) => {
         const s = list[i]!;
-        if (s.id === session.id) return void addPlain("✗ can't delete the current session — use /drop", () => RED);
+        if (s.id === session.id) return void sysErr("can't delete the current session — use /drop");
         deleteSession(cwd, s.id);
         closePicker();
         sessionsCommand(); // re-open with the updated list (or show "no sessions yet" if now empty)
@@ -785,9 +790,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/help", "this help");
     cmd("/sessions", "browse sessions — ↑/↓ · Enter resume · d delete");
     cmd("/resume", "resume the last session");
-    cmd("/model [id]", "switch model — a picker if no id");
+    cmd("/models", "switch model (interactive picker)");
     cmd("/mode", "toggle PLAN ↔ EDIT");
-    cmd("/compact [focus]", "summarize old turns to reclaim context");
+    cmd("/compact", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
     cmd("/reload", "hot-reload tools + interceptors");
     cmd("/drop", "delete this session, start a fresh one");
@@ -833,7 +838,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         clearTranscript();
         return;
       case "compact":
-        return void compact(args.join(" "));
+        return void compact();
       case "reload":
         return void reload();
       case "drop":
@@ -841,36 +846,26 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       case "mode":
         toggleMode(); // just flip PLAN ↔ EDIT — no need to name the target (badge is the indicator)
         return;
-      case "model": {
-        const apply = (entry: ModelEntry): void => {
-          try {
-            provider = providerFor(entry); // may throw if the key is missing — leave `active` unchanged then
-            active = entry;
-            setStatus(); // the model id (status bar + session panel) is the indicator
-            void refreshBalance();
-          } catch (e) {
-            addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
-          }
-        };
-        const id = args[0];
-        if (id) {
-          try {
-            apply(selectModel(models, id));
-          } catch (e) {
-            addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
-          }
-          return;
-        }
+      case "models":
         openPicker({
           title: "model · ↑/↓ · Enter select · Esc close",
           items: models.map((m) => ({ label: m.id, desc: m.label, current: m.id === active.id })),
-          onPick: (i) => apply(models[i]!),
+          onPick: (i) => {
+            const entry = models[i]!;
+            try {
+              provider = providerFor(entry); // may throw if the key is missing — leave `active` unchanged then
+              active = entry;
+              setStatus(); // the model id (status bar + session panel) is the indicator
+              void refreshBalance();
+            } catch (e) {
+              sysErr(e instanceof Error ? e.message : String(e));
+            }
+          },
         });
         return;
-      }
       case "balance":
         await refreshBalance();
-        addPlain(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, () => MUTE);
+        addText(() => t`${fg(MUTE)("balance")}  ${fg(GREEN)(formatBalance(balance))}${active.provider === "gemini" ? fg(DIM)("  (Gemini has no balance API)") : ""}`);
         return;
       case "resume":
         return void resumeSession(); // last session only — pick a specific one from /sessions
@@ -883,7 +878,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         // D12: a skill → load its SKILL.md on demand and invoke its instructions.
         const skill = skills.find((s) => s.name === name);
         if (skill) return void invokeSkill(skill, args);
-        addPlain(`unknown command: /${name} (try /help)`, () => MUTE);
+        sysErr(`unknown command: /${name} (try /help)`);
       }
     }
   }
@@ -922,9 +917,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     try {
       body = await loadSkillBody(skill.path);
     } catch (e) {
-      return void addPlain(`✗ couldn't load skill "${skill.name}": ${e instanceof Error ? e.message : String(e)}`, () => RED);
+      return void sysErr(`couldn't load skill "${skill.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (!body) return void addPlain(`✗ skill "${skill.name}" is empty`, () => RED);
+    if (!body) return void sysErr(`skill "${skill.name}" is empty`);
     await sendPrompt(expandCommand(body, args), () => t`${bold(fg(GREEN)("❯"))} ${fg(MUTE)(`/${skill.name}`)} ${fg(DIM)("(skill)")}`);
   }
 
@@ -990,10 +985,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           addText(() => t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
           answer = addMarkdown(); // fresh block for the retried attempt
         },
-        onError: (e) => addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED),
+        onError: (e) => sysErr(e instanceof Error ? e.message : String(e)),
       });
     } catch (e) {
-      addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
+      sysErr(e instanceof Error ? e.message : String(e));
     } finally {
       answer.streaming = false;
       turnAbort = null;
@@ -1018,7 +1013,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (!issues) return;
     const issueSummary = summaries.join("\n\n");
     if (issueSummary === prevIssues) {
-      addText(() => t`${fg(YELLOW)("⚠")} ${fg(MUTE)("post-edit issues unchanged after a fix attempt — leaving them for you")}`);
+      sysWarn("post-edit issues unchanged after a fix attempt — leaving them for you");
       return;
     }
     // Hand the failing checks back; the agent triages (fix critical/quick, defer non-critical).

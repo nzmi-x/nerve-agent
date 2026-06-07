@@ -43,8 +43,9 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode /clear /compact [focus] /reload /sessions /resume /drop /balance /quit`
-  (`/help` is **color-coded**; commands that took a parameter are now **interactive pickers** — see below)
+- **Commands:** `/help /models /mode /clear /compact /reload /sessions /resume /drop /balance /quit`
+  — **none take parameters**; what used to need an argument is now an **interactive picker** (`/help` is
+  color-coded). System lines are consistently iconned: `·` info · `✦` ok · `⚠` warn · `✗` error.
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
   `<name>.md` under any `commandRoots` dir (`~/.nerve/projects/<slug>/commands` · `./.claude/commands` ·
   `~/.nerve/commands` · `~/.claude/commands`, D22) expands its body (`$1`/`$@`/`$ARGUMENTS` substitution)
@@ -58,8 +59,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   it (refuses the current — use `/drop`), and it re-lists after a delete. **`/resume`** just reloads the
   **last** session (the per-session choice lives in `/sessions` now). Resuming replays the messages
   (`renderHistory`); discovery via `src/sessions.ts`.
-- **Model:** **`/model`** (no id) opens the picker (current marked `●`); **`/model <id>`** still switches
-  directly.
+- **Model:** **`/models`** opens the model picker (current marked `●`, Enter to switch).
 - **Hot-swap ([D7](../DECISIONS.md)):** `/reload` (or **Ctrl+R**) re-imports tools + interceptors from
   disk (cache-busted), conversation preserved; `reload()` calls `reloadTools()` + re-imports
   `interceptors.ts`, refreshes the provider specs, and on failure keeps the running set (rollback).
