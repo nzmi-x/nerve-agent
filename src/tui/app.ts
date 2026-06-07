@@ -192,11 +192,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     placeholder: "Message · @file · !shell · /command · Alt+Enter newline",
     textColor: FG,
     cursorColor: ACCENT,
-    keyBindings: [
-      ...defaultTextareaKeyBindings.filter((b) => b.action !== "newline" || b.ctrl || b.shift || b.meta), // drop default Enter→newline
-      { name: "return", action: "submit" }, // Enter sends
-      { name: "return", meta: true, action: "newline" }, // Alt+Enter inserts a newline
-    ],
+    // Drop the default Enter→newline; Enter (send) and Alt+Enter (newline) are handled in the global
+    // keypress handler, which definitely fires — so sending never depends on the Textarea's own binding.
+    keyBindings: defaultTextareaKeyBindings.filter((b) => b.action !== "newline" || b.ctrl || b.shift || b.meta),
     onContentChange: () => {
       if (echoGuard !== null && input.plainText === echoGuard) {
         echoGuard = null;
@@ -204,30 +202,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       }
       echoGuard = null;
       void updateSuggestions(input.plainText);
-    },
-    onSubmit: () => {
-      if (asking) {
-        const a = asking;
-        asking = null;
-        setPopup([]);
-        a.resolve(a.req.options[a.sel]!.label);
-        return;
-      }
-      if (suggestOpen()) {
-        const it = suggest.items[suggest.sel];
-        if (it && suggest.kind === "slash") return void submit(`/${it.insert}`);
-        if (it && suggest.kind === "at") {
-          const next = applyAtSuggestion(input.plainText, it.insert);
-          if (it.insert.endsWith("/")) {
-            echoGuard = next;
-            input.setText(next);
-            void updateSuggestions(next);
-            return;
-          }
-          return void submit(next);
-        }
-      }
-      void submit(input.plainText);
     },
   });
   inputBox.add(prompt);
@@ -1004,6 +978,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       applySidebar(); // the panel appearing/disappearing is the indicator — no transcript log
       return;
     }
+    if (key.name === "return" && (key.meta || key.option)) return void input.insertText("\n"); // Alt+Enter → newline
 
     if (asking) {
       if (key.name === "up") {
@@ -1012,8 +987,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       } else if (key.name === "down") {
         asking.sel = Math.min(asking.req.options.length - 1, asking.sel + 1);
         renderAsk();
+      } else if (key.name === "return") {
+        const a = asking;
+        asking = null;
+        setPopup([]);
+        a.resolve(a.req.options[a.sel]!.label);
       }
-      // Enter (return) is handled by the Textarea's onSubmit, which resolves the picker.
       return;
     }
 
@@ -1037,7 +1016,24 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         clearSuggest();
         return;
       }
+      if (key.name === "return") {
+        const it = suggest.items[suggest.sel];
+        if (it && suggest.kind === "slash") return void submit(`/${it.insert}`); // `/ex`↵ → run /exit
+        if (it && suggest.kind === "at") {
+          const next = applyAtSuggestion(input.plainText, it.insert);
+          if (it.insert.endsWith("/")) {
+            // a directory drills in — complete + keep the popup open, don't send
+            echoGuard = next;
+            input.setText(next);
+            void updateSuggestions(next);
+            return;
+          }
+          return void submit(next); // a file completes and sends
+        }
+        return; // popup open but nothing highlighted → swallow Enter
+      }
     }
+    if (key.name === "return") return void submit(input.plainText); // Enter sends the message
     if (key.name === "tab") return void toggleMode(); // plain Tab with no popup also toggles the mode
     if (key.name === "escape") turnAbort?.abort();
   });
