@@ -43,8 +43,9 @@ export interface LoopOptions {
   maxTurns?: number;
   onEvent?: (ev: StreamEvent) => void;
   /** A tool is about to be dispatched (before its result) — lets a surface show it as in-flight. `id` is
-   *  the tool-call id (matches `onToolResult`), needed because read-only calls run concurrently. */
-  onToolStart?: (name: string, id: string) => void;
+   *  the tool-call id (matches `onToolResult`), needed because read-only calls run concurrently. `args` is
+   *  the raw JSON arg string, so a surface can show what the call does (e.g. `⎿ read app.ts`). */
+  onToolStart?: (name: string, id: string, args: string) => void;
   onToolResult?: (name: string, result: string, id: string) => void;
   /** A transient failure is being retried (fallback or backoff). `delayMs:0` = ladder switch. */
   onRetry?: (info: { attempt: number; delayMs: number; model: string; error: unknown }) => void;
@@ -140,7 +141,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
     // the model's original call order, so replay/compaction stay deterministic.
     const results = new Map<string, string>();
     const run = async (call: ToolCall): Promise<void> => {
-      opts.onToolStart?.(call.name, call.id);
+      opts.onToolStart?.(call.name, call.id, call.args);
       const result = await dispatch(call.name, parseArgs(call.args), opts.mode, opts.ctx);
       results.set(call.id, result);
       opts.onToolResult?.(call.name, result, call.id);

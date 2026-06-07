@@ -25,6 +25,7 @@ export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
   { name: "models", description: "Switch model (interactive picker)" },
   { name: "mode", description: "Toggle PLAN ↔ EDIT" },
+  { name: "mouse", description: "Toggle mouse capture (wheel-scroll ↔ native select/copy)" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "compact", description: "Summarize old turns to free up context" },
   { name: "reload", description: "Hot-swap tools + interceptors from disk (Ctrl+R)" },
@@ -117,20 +118,49 @@ export async function loadSkillBody(path: string): Promise<string> {
   return md.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
 
-/** A long (>200 chars) or multi-line paste collapses to a compact token in the input (#3); `null` =
- *  short single-line, insert it as-is. The full text is stashed by the caller and restored on send. */
-export function pasteToken(text: string): { token: string; lines: number } | null {
-  const lines = text.replace(/\n+$/, "").split("\n").length;
-  if (lines <= 1 && text.length <= 200) return null;
-  return { token: `[Pasted ${lines} line${lines === 1 ? "" : "s"}]`, lines };
+/** A short, human-readable summary of a tool call's key argument for the transcript line
+ *  (`⎿ read app.ts`, `⎿ bash mkdir …`, `⎿ grep "foo"`). Falls back to the first string arg. Pure/tested. */
+export function toolArgSummary(name: string, argsJson: string): string {
+  let a: Record<string, unknown> = {};
+  try {
+    const v: unknown = JSON.parse(argsJson || "{}");
+    if (v && typeof v === "object") a = v as Record<string, unknown>;
+  } catch {
+    /* malformed args → empty summary */
+  }
+  const s = (k: string): string => (typeof a[k] === "string" ? (a[k] as string) : "");
+  const q = (v: string): string => (/\s/.test(v) ? `"${v}"` : v);
+  let out: string;
+  switch (name) {
+    case "read": case "write": case "edit": case "ls": case "notebook": out = s("path"); break;
+    case "glob": out = s("pattern"); break;
+    case "grep": out = q(s("pattern")) + (s("path") ? ` in ${s("path")}` : ""); break;
+    case "bash": out = s("command"); break;
+    case "fetch": out = s("url"); break;
+    case "search": out = q(s("query")); break;
+    case "manual": out = s("topic") || "(index)"; break;
+    case "lsp": out = `${s("op")} ${s("path")}`.trim(); break;
+    case "ask_user": out = s("question"); break;
+    case "task": out = s("prompt").split("\n")[0] ?? ""; break;
+    default: out = (Object.values(a).find((v) => typeof v === "string") as string | undefined) ?? "";
+  }
+  out = out.replace(/\s+/g, " ").trim();
+  return out.length > 60 ? `${out.slice(0, 59)}…` : out;
 }
 
-/** Restore stashed paste content (in paste order) into a message before it's sent; clears `stash`. */
-export function expandPastes(text: string, stash: string[]): string {
-  if (!stash.length) return text;
-  let i = 0;
-  const out = text.replace(/\[Pasted \d+ lines?\]/g, () => stash[i++] ?? "");
-  stash.length = 0;
+/** Line count if a paste should collapse to a token (multi-line OR >200 chars), else `null` = short
+ *  single-line, insert as-is. The caller stashes the full text under an id and inserts the token. */
+export function pasteToken(text: string): number | null {
+  const lines = text.replace(/\n+$/, "").split("\n").length;
+  return lines <= 1 && text.length <= 200 ? null : lines;
+}
+
+/** Substitute `[Pasted N lines #id]` tokens with their stashed full text **by id** before sending, so a
+ *  deleted/edited token is simply dropped (no order dependence) and the rest still resolve; clears `stash`. */
+export function expandPastes(text: string, stash: Map<number, string>): string {
+  if (!stash.size) return text;
+  const out = text.replace(/\[Pasted \d+ lines? #(\d+)\]/g, (_, id: string) => stash.get(Number(id)) ?? "");
+  stash.clear();
   return out;
 }
 

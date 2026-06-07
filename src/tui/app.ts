@@ -28,13 +28,13 @@ import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
-import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, type CommandInfo, type Skill } from "./affordances.ts";
+import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme } from "./theme.ts";
-import type { Mode } from "../dispatch.ts";
+import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
@@ -106,6 +106,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // menu) and no Kitty keyboard protocol (so the terminal's own Ctrl+Shift+C/V copy-paste keep working
   // instead of being grabbed by the app). Trade-off: Shift+Enter isn't distinguishable from Enter without
   // Kitty, so the multi-line newline is Alt+Enter; and transcript scroll is by keyboard (PgUp/PgDn).
+  // `/mouse` flips `renderer.useMouse` at runtime to opt into wheel-scroll (then select needs Shift+drag).
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30, useMouse: false, useKittyKeyboard: null });
   renderer.setBackgroundColor(DARKFG);
   const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
@@ -125,14 +126,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let balance: Balance | null = null;
   let mode: Mode = opts.mode;
   let busy = false;
+  let aborting = false; // ESC pressed during a turn — show "stopping…" until the turn actually ends
+  let spin = 0; // activity-spinner frame (animated while busy, so the user can see the agent is alive)
   let turnAbort: AbortController | null = null;
   let lineId = 0;
   let echoGuard: string | null = null;
-  // Long/multi-line pastes collapse to a "[Pasted N lines]" token in the input (so they don't flood it);
-  // the full text is stashed here and substituted back, in order, when the message is sent (#3).
-  const pastes: string[] = [];
+  // Long/multi-line pastes collapse to a "[Pasted N lines #id]" token at the cursor (so they don't flood
+  // the box). Each paste is stashed under a unique id and substituted back **by id** on send — so deleting
+  // (or editing) a token just drops that paste, with no effect on the others (#1 cursor, #3 delete/undo).
+  const pastes = new Map<number, string>();
+  let pasteSeq = 0;
   let pendingRetheme = false; // a system light/dark change arrived mid-turn — apply it once idle (D30)
   let themeMonitor: ReturnType<typeof Bun.spawn> | null = null;
+  let activityTimer: ReturnType<typeof setInterval> | null = null;
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
@@ -231,14 +237,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     todoRows.push(tr);
   }
   let currentTodos: Todo[] = []; // last set — replayed by retheme to recolor the panel (D30)
-  const setTodos = (todos: Todo[]): void => {
-    currentTodos = todos;
-    const shown = todos.slice(0, MAX_TODO_ROWS - 1);
+  let todoVisible = false; // the full list is hidden by default (Ctrl+T toggles); the sidebar shows a 1-line summary
+  // Render the pinned full-list panel below the transcript — only when toggled on (else height 0).
+  const renderTodoPanel = (): void => {
     const rows: Content[] = [];
-    if (shown.length) {
-      const done = todos.filter((td) => td.status === "completed").length;
-      const extra = todos.length > shown.length ? `  +${todos.length - shown.length}` : "";
-      rows.push(t`${bold(fg(ACCENT)("☑ todos"))} ${fg(MUTE)(`· ${done}/${todos.length}${extra}`)}`);
+    if (todoVisible) {
+      const shown = currentTodos.slice(0, MAX_TODO_ROWS - 1);
+      const done = currentTodos.filter((td) => td.status === "completed").length;
+      const extra = currentTodos.length > shown.length ? `  +${currentTodos.length - shown.length}` : "";
+      rows.push(t`${bold(fg(ACCENT)("☑ todos"))} ${fg(MUTE)(currentTodos.length ? `· ${done}/${currentTodos.length}${extra}` : "· (none yet)")}`);
       for (const td of shown) {
         if (td.status === "completed") rows.push(t`${fg(GREEN)(" ✓")} ${fg(DIM)(td.content)}`);
         else if (td.status === "in_progress") rows.push(t`${fg(YELLOW)(" ▸")} ${bold(fg(WHITE)(td.content))}`);
@@ -251,6 +258,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       tr.height = i < rows.length ? 1 : 0;
     }
     todoBox.height = rows.length;
+  };
+  const setTodos = (todos: Todo[]): void => {
+    currentTodos = todos;
+    renderTodoPanel(); // the full panel (respects todoVisible)
+    renderSidebar(); // the 1-line summary panel reflects the new state
+  };
+  const toggleTodos = (): void => {
+    todoVisible = !todoVisible;
+    renderTodoPanel();
   };
 
   // --- responsive sidebar (D29): session + files panels; Ctrl+B toggles, narrow terminals auto-hide ---
@@ -275,12 +291,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     return rows;
   };
   const sessionPanel = mkPanel("sessionPanel", " session ", () => CYAN);
+  const todosPanel = mkPanel("todosPanel", " todos ", () => ACCENT); // 1-line summary (full list is Ctrl+T)
   const skillsPanel = mkPanel("skillsPanel", " skills ", () => MAGENTA);
   const lspPanel = mkPanel("lspPanel", " lsp ", () => ACCENT);
   const toolsPanel = mkPanel("toolsPanel", " tools ", () => GREEN);
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => YELLOW);
   const filesPanel = mkPanel("filesPanel", " files ", () => ORANGE, true);
-  for (const p of [sessionPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
+  for (const p of [sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
   const LSP_ROWS = 5;
@@ -288,11 +305,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const SUB_ROWS = 6;
   const FILE_ROWS = 40;
   const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
+  const todoSumRows = mkRows(todosPanel, 1, "todosum", 1); // single summary row
   const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
   const lspRows = mkRows(lspPanel, LSP_ROWS, "lsp", 0);
   const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
   const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
   const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
+  // The animated working indicator (spinner + label), shared by the session panel + status bar. A *moving*
+  // spinner is the point: it proves the agent is alive (a frozen one means it stalled), the label flips to
+  // red "stopping…" the instant ESC registers, and the whole indicator disappears when the turn ends — so
+  // the user always knows working vs. interrupting vs. stopped. Advanced by `activityTimer`.
+  const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const activityChunk = (pad = false) =>
+    fg(aborting ? RED : YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
   function renderSidebar(): void {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
@@ -302,9 +327,22 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     sessionRows[2]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
     sessionRows[3]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
     sessionRows[4]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
-    sessionRows[5]!.content = busy ? t`${fg(YELLOW)("● streaming")}` : ""; // only while a turn runs
+    sessionRows[5]!.content = busy ? t`${activityChunk()}` : ""; // animated working/stopping indicator
     sessionRows[5]!.height = busy ? 1 : 0;
     sessionPanel.height = (busy ? 6 : 5) + 2; // grows by the streaming row + border
+
+    // todos panel: a 1-line summary (the full list is the Ctrl+T panel) — done/total + the current focus.
+    if (currentTodos.length) {
+      const done = currentTodos.filter((td) => td.status === "completed").length;
+      const inProg = currentTodos.find((td) => td.status === "in_progress");
+      const next = inProg ?? currentTodos.find((td) => td.status === "pending");
+      const icon = inProg ? fg(YELLOW)("▸") : next ? fg(MUTE)("○") : fg(GREEN)("✓");
+      todoSumRows[0]!.content = t`${icon} ${fg(MUTE)(`${done}/${currentTodos.length}`)} ${fg(FG)(trunc(next ? next.content : "all done", W - 6))}`;
+    } else {
+      todoSumRows[0]!.content = t`${fg(DIM)("(no todos)")}`;
+    }
+    todosPanel.height = 3; // 1 summary row + border
+
     // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
     const skills = activeSkillNames(langTouched).slice(0, SKILL_ROWS);
     for (let i = 0; i < skillRows.length; i++) {
@@ -378,7 +416,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
     // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
     const files = [...langTouched].reverse();
-    const usedAbove = sessionPanel.height + (skills.length + 2) + lspPanel.height + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
+    const usedAbove = sessionPanel.height + todosPanel.height + (skills.length + 2) + lspPanel.height + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
     const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
@@ -455,7 +493,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const i = lines.findIndex((l) => l.el === el);
     if (i >= 0) lines.splice(i, 1);
   };
+  // Stop a (possibly-null) prose block's streaming cursor. A free helper so the call site isn't subject to
+  // TS narrowing `answer` to `null` — it can't see the closures that mutate `answer` during the turn.
+  const sealBlock = (m: MarkdownRenderable | null): void => void (m && (m.streaming = false));
   const spacer = (): void => void addText(() => "");
+  // A faint full-width divider between turns. Width is recomputed per render (theme change / next paint).
+  const rule = (): void => void addText(() => t`${fg(DIM)("─".repeat(Math.max(4, (transcriptBox.width || renderer.width) - 4)))}`);
   // Consistent, color-coded system lines: info (· dim), ok (✦ magenta), warn (⚠ yellow), err (✗ red).
   const sysInfo = (msg: string): void => void addText(() => t`${fg(DIM)("·")} ${fg(MUTE)(msg)}`);
   const sysOk = (msg: string): void => void addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(msg)}`);
@@ -474,6 +517,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     transcriptBox.borderColor = ACCENT; // titled panels keep their accent border (the title rides on it)
     inputBox.borderColor = BORDER;
     sessionPanel.borderColor = CYAN;
+    todosPanel.borderColor = ACCENT;
     skillsPanel.borderColor = MAGENTA;
     lspPanel.borderColor = ACCENT;
     toolsPanel.borderColor = GREEN;
@@ -651,7 +695,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const setStatus = (): void => {
     const s = meter.snapshot();
     const badge = mode === "edit" ? bg(GREEN)(fg(DARKFG)(" EDIT ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
-    status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? fg(YELLOW)("   ● streaming") : ""}`;
+    status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
@@ -819,6 +863,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/resume", "resume the last session");
     cmd("/models", "switch model (interactive picker)");
     cmd("/mode", "toggle PLAN ↔ EDIT");
+    cmd("/mouse", "toggle mouse (wheel-scroll ↔ native select/copy)");
     cmd("/compact", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
     cmd("/reload", "hot-reload tools + interceptors");
@@ -833,11 +878,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer();
     sec("keys");
     key("Enter", "send  ·  Alt+Enter newline");
-    key("Tab", "accept suggestion / toggle mode");
+    key("Tab", "accept suggestion");
     key("Shift+Tab", "toggle PLAN ↔ EDIT");
     key("↑ / ↓", "navigate popups");
-    key("PgUp / PgDn", "scroll the transcript");
+    key("Ctrl+↑ / Ctrl+↓", "scroll the transcript (Alt+↑/↓ too)");
     key("Ctrl+B", "toggle sidebar");
+    key("Ctrl+T", "toggle the todo list");
     key("Ctrl+R", "reload");
     key("ESC", "stop the turn / close a popup");
     key("Ctrl+C", "quit");
@@ -872,6 +918,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return void drop();
       case "mode":
         toggleMode(); // just flip PLAN ↔ EDIT — no need to name the target (badge is the indicator)
+        return;
+      case "mouse":
+        // Toggle mouse capture at runtime: ON → the wheel scrolls the transcript, but the app owns the
+        // mouse so native click-drag select is replaced by Shift+drag. OFF (default) → native select +
+        // right-click copy, scroll by keyboard. Lets the user opt into the wheel only when they want it.
+        renderer.useMouse = !renderer.useMouse;
+        if (renderer.useMouse) sysOk("mouse ON — wheel scrolls the transcript · Shift+drag to select text");
+        else sysInfo("mouse OFF — native select + right-click copy · PgUp/PgDn or Ctrl+↑/↓ to scroll");
         return;
       case "models":
         openPicker({
@@ -914,8 +968,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const raw = value.trim();
     input.setText("");
     clearSuggest();
-    if (!raw || busy) return void (pastes.length = 0);
-    const expanded = expandPastes(raw, pastes); // restore any "[Pasted N lines]" tokens (also clears the stash)
+    if (!raw || busy) {
+      pastes.clear();
+      pasteSeq = 0;
+      return;
+    }
+    const expanded = expandPastes(raw, pastes); // restore any surviving "[Pasted N lines #id]" tokens (also clears the stash)
+    pasteSeq = 0;
     if (raw.startsWith("!")) return void runShell(expanded.slice(1));
     if (raw.startsWith("/")) return void runCommand(raw); // commands run literally (paste tokens pass through)
     await sendPrompt(expanded, () => t`${bold(fg(GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
@@ -926,8 +985,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (busy) return;
     busy = true;
     setStatus();
+    if (lines.length > 1) {
+      // not the first turn → a faint divider + breathing room separates this exchange from the last
+      spacer();
+      rule();
+    }
     spacer();
     addText(echo);
+    spacer(); // breathing room before the assistant's answer
     session.addUser(modelText);
     await runAgentTurn();
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
@@ -955,7 +1020,18 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // agent's stuck, so we stop (no hardcoded retry cap; the agent's choice to stop editing ends it).
   async function runAgentTurn(prevIssues?: string): Promise<void> {
     let reasoningLine: TextRenderable | null = null;
-    let answer = addMarkdown();
+    // The assistant's prose is rendered lazily (created on the first text delta) and **sealed when a tool
+    // call starts**, so the next step's prose opens a FRESH block *below* the tool-result lines — the
+    // transcript interleaves prose → tools → prose → tools chronologically, instead of pooling all prose
+    // at the top and all tool lines at the bottom.
+    let answer: MarkdownRenderable | null = null;
+    const argSummaries = new Map<string, string>(); // tool-call id → its key arg, for the `⎿ name arg` line
+    // After a tool block prints, the next prose/reasoning block gets a blank line above it for breathing room.
+    let proseGap = false;
+    const gapIfNeeded = (): void => {
+      if (proseGap) spacer();
+      proseGap = false;
+    };
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
     const packs = activePacks(langTouched);
     const key = packs.map((p) => p.id).join(",");
@@ -963,7 +1039,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       langSkillText = await langSkills(packs);
       langSkillKey = key;
     }
-    const sys = [system, await defaultSkills(), packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
+    const sys = [system, await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
     const edited = new Set<string>();
     const ac = new AbortController();
     turnAbort = ac;
@@ -973,11 +1049,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal, onSubagent },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal, onSubagent, onCost: (usd) => (meter.addCost(usd), setStatus()) },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
-            reasoningLine ??= addPlain("✻ ", () => DIM, TextAttributes.ITALIC);
+            if (!reasoningLine) {
+              gapIfNeeded();
+              reasoningLine = addPlain("✻ ", () => DIM, TextAttributes.ITALIC);
+            }
             reasoningLine.content += d;
           }),
           ic.tokenTap(session),
@@ -989,35 +1068,53 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         temperature: active.temperature,
         fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder
         onEvent: (ev) => {
-          if (ev.type === "text") answer.content += ev.delta;
-          else if (ev.type === "usage") {
+          if (ev.type === "text") {
+            if (!answer) {
+              gapIfNeeded(); // blank line after a tool block, before this fresh prose
+              answer = addMarkdown();
+            }
+            answer.content += ev.delta;
+          } else if (ev.type === "usage") {
             meter.record({ input: ev.input, output: ev.output }, active.pricing);
             setStatus();
           }
         },
-        onToolStart: (name, id) => {
+        onToolStart: (name, id, args) => {
+          // the model finished talking for this step → seal the prose so the next step opens fresh below
+          if (answer) {
+            answer.streaming = false;
+            answer = null;
+          }
+          reasoningLine = null;
+          argSummaries.set(id, toolArgSummary(name, args)); // remember what this call does, for its line
           toolCalls.push({ id, name, status: "running" }); // sidebar tools panel: in-flight ●
           renderSidebar();
         },
         onToolResult: (name, result, id) => {
+          const ok = !/^(Error|Refused)/.test(result);
           const tc = toolCalls.find((c) => c.id === id); // match by id — read-only calls finish out of order
-          if (tc) tc.status = /^(Error|Refused)/.test(result) ? "err" : "ok"; // ✓ / ✗
+          if (tc) tc.status = ok ? "ok" : "err"; // ✓ / ✗
           renderSidebar();
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
-          addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);
+          // `⎿ name  <arg>` — name + glyph colored by outcome (cyan/green ok, red error); on failure the
+          // error message tails it (the arg alone isn't enough to know what went wrong).
+          const arg = argSummaries.get(id) ?? "";
+          const tail = ok ? "" : `  ${firstLine(result)}`;
+          addText(() => t`${fg(ok ? GREEN : RED)("⎿")} ${fg(ok ? CYAN : RED)(name)}  ${fg(ok ? MUTE : RED)(arg)}${fg(RED)(tail)}`);
+          proseGap = true; // a tool just printed → the next prose block gets a blank line above it
         },
         onRetry: ({ delayMs, model }) => {
-          removeLine(answer); // drop the failed (usually empty) attempt
+          if (answer) removeLine(answer); // drop the failed (usually empty) attempt
+          answer = null; // the retried attempt opens a fresh block on its first text delta
           reasoningLine = null;
           addText(() => t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
-          answer = addMarkdown(); // fresh block for the retried attempt
         },
         onError: (e) => sysErr(e instanceof Error ? e.message : String(e)),
       });
     } catch (e) {
       sysErr(e instanceof Error ? e.message : String(e));
     } finally {
-      answer.streaming = false;
+      sealBlock(answer); // close the final prose block's streaming cursor (if any)
       turnAbort = null;
       for (const f of edited) sessionEdited.add(f); // sidebar: these files were written/edited this session
       renderSidebar(); // refresh the files panel (langTouched grew during the turn)
@@ -1064,6 +1161,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     turnAbort?.abort();
+    if (activityTimer) clearInterval(activityTimer); // stop the working-indicator animation
     themeMonitor?.kill(); // stop following the system theme (D30)
     await session.close();
     await opts.lsp?.stop();
@@ -1075,15 +1173,24 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // (Autosuggest + submit are wired via the Textarea's onContentChange / onSubmit, set at construction.)
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (key.ctrl && key.name === "c") return void shutdown(); // Ctrl+Shift+C is now the terminal's copy (Kitty off)
-    // Keyboard scroll for the transcript (mouse capture is off → no wheel): PgUp/PgDn by ~a page.
-    if (key.name === "pageup") return void transcript.scrollBy(-(Math.max(3, transcriptBox.height - 4)));
-    if (key.name === "pagedown") return void transcript.scrollBy(Math.max(3, transcriptBox.height - 4));
+    // Keyboard scroll (mouse off → no wheel unless `/mouse`). Ctrl+↑/↓ or Alt+↑/↓ scroll a few lines —
+    // keys ghostty passes to the app and the input's Textarea doesn't bind. (PgUp/PgDn were dropped: many
+    // terminals grab them for their own scrollback, so they never arrived.) ScrollBox drops sticky on scroll.
+    const scroll = (delta: number): void => void (key.preventDefault(), transcript.scrollBy(delta));
+    if ((key.ctrl || key.meta || key.option) && key.name === "up") return scroll(-3);
+    if ((key.ctrl || key.meta || key.option) && key.name === "down") return scroll(3);
     if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
     if (key.ctrl && key.name === "b") {
       key.preventDefault(); // else the Textarea also runs readline Ctrl+B (move-back-char)
       key.stopPropagation();
       sidebarOn = !sidebarOn;
       applySidebar(); // the panel appearing/disappearing is the indicator — no transcript log
+      return;
+    }
+    if (key.ctrl && key.name === "t") {
+      key.preventDefault(); // else the Textarea runs readline Ctrl+T (transpose-chars)
+      key.stopPropagation();
+      toggleTodos(); // show/hide the full todo list (hidden by default; sidebar shows the 1-line summary)
       return;
     }
     // Enter-family: we OWN it (preventDefault), so the Textarea doesn't *also* newline/submit (double-act).
@@ -1177,19 +1284,26 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       }
       // (Enter over a popup is handled in the Enter-family block above.)
     }
-    if (key.name === "tab") return void toggleMode(); // plain Tab with no popup also toggles the mode
-    if (key.name === "escape") turnAbort?.abort();
+    // (plain Tab no longer toggles the mode — Shift+Tab / `/mode` do that; Tab only accepts a suggestion.)
+    if (key.name === "escape" && busy && turnAbort) {
+      aborting = true; // flip the indicator to red "stopping…" immediately so ESC visibly registers
+      turnAbort.abort();
+      if (sidebar.width > 0) sessionRows[5]!.content = t`${activityChunk()}`;
+      else setStatus();
+    }
   });
 
   // Paste shortening (#3): a long or multi-line paste becomes a compact "[Pasted N lines]" token in the
   // input (the full text is stashed + restored on send), so the single-line box isn't flooded / collapsed.
   renderer.keyInput.on("paste", (ev: { bytes: Uint8Array; preventDefault: () => void }) => {
     const text = new TextDecoder().decode(ev.bytes);
-    const p = pasteToken(text);
-    if (!p) return; // short single-line paste → let the input insert it normally
+    const lines = pasteToken(text);
+    if (lines === null) return; // short single-line paste → let the input insert it normally
     ev.preventDefault();
-    pastes.push(text);
-    input.setText(`${input.plainText}${p.token}`); // fires onContentChange → suggestions refresh
+    const id = ++pasteSeq;
+    pastes.set(id, text);
+    // insert AT the cursor (not append) so the token lands left of the caret and the caret moves past it (#1)
+    input.insertText(`[Pasted ${lines} line${lines === 1 ? "" : "s"} #${id}]`);
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
@@ -1197,6 +1311,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
+
+  // Animate the working indicator (~11 fps) so the user can always see the agent is alive. Cheap: while
+  // busy it advances the spinner on just the visible surface (session panel if the sidebar's up, else the
+  // status bar); while idle it clears the "stopping…" latch and does nothing else.
+  activityTimer = setInterval(() => {
+    if (!busy) {
+      aborting = false;
+      return;
+    }
+    spin = (spin + 1) % SPINNER.length;
+    if (sidebar.width > 0) sessionRows[5]!.content = t`${activityChunk()}`;
+    else setStatus();
+  }, 90);
 }
 
 function firstLine(s: string): string {

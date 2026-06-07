@@ -16,13 +16,16 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   line re-rendered from a stored thunk → zero loss). A flip mid-stream is deferred to turn end.
 - Main column: a **bordered transcript** `Box` (rounded, title " ◆ &lt;title&gt; ") wrapping a `ScrollBox`
   (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
-  in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a `popup` `Box` (autosuggest
+  in place by the `todo` tool via `ctx.setTodos`; **hidden by default — `Ctrl+T` toggles it** (`todoVisible`/
+  `renderTodoPanel`), since the sidebar carries a 1-line summary) · a `popup` `Box` (autosuggest
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**
-  (the title rides on the border colour — session=cyan, skills=magenta, lsp=accent, tools=green,
-  subagents=yellow, files=orange; the transcript box is accent-blue). **session** (model · mode badge ·
-  cost · ctx · balance — the *session title* lives in the transcript box header, not here), **lsp** (spawned
+  (the title rides on the border colour — session=cyan, todos=accent, skills=magenta, lsp=accent,
+  tools=green, subagents=yellow, files=orange; the transcript box is accent-blue). **session** (model ·
+  mode badge · cost · ctx · balance — the *session title* lives in the transcript box header, not here),
+  **todos** (a **1-line summary** of the task list — `▸ done/total <current focus>`, the always-visible
+  counterpart to the Ctrl+T full panel), **lsp** (spawned
   language servers + state `●`/`◌`/`✗`, from `Lsp.serverStatus()`), **tools** also shows the **post-edit
   hooks** (ruff/prettier/…) as they run, **skills** (the skills *loaded into context now* —
   always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
@@ -37,17 +40,43 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   loop's tool hooks. Resets with the session (`/drop`, `/resume`).
 - **Assistant answers render as markdown** — a streaming `MarkdownRenderable` (`SyntaxStyle` from the
   palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
-  `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are
-  appended (`transcript.add`) and removed by id (`transcript.remove(id)`) for `/clear` & `/drop`.
+  `bold` template (green `❯`); reasoning dim/italic (`✻`); shell `$`. **Tool-result lines** are
+  `⎿ <name>  <arg>` — the call's salient argument (`toolArgSummary`: `read app.ts`, `bash mkdir …`,
+  `grep "foo"`), not the result dump — with the `⎿` + name **colored by outcome** (green/cyan ok, red on
+  `Error`/`Refused`, with the error message tailing it). **Turn separation + density:** each new exchange
+  gets a faint full-width `rule()` divider + blank lines (`lines.length>1` guard skips the first), and a
+  blank line is inserted after a tool block before the next prose/reasoning (`proseGap`/`gapIfNeeded`), so
+  steps and turns don't run together. Lines are appended (`transcript.add`) and removed by id
+  (`transcript.remove(id)`) for `/clear` & `/drop`.
+- **Chronological interleave (one turn = many steps).** A single `runAgentTurn` can be several
+  model↔tool round-trips. The prose block is created **lazily** (on the first text delta) and **sealed
+  when the next tool call starts** (`onToolStart` → `streaming=false`, `answer=null`; `reasoningLine`
+  reset too) — so each step's prose opens a **fresh block below** that step's `⎿` tool lines, reading
+  prose → tools → prose → tools in order, instead of pooling all prose at the top and all tool lines at
+  the bottom. (`sealBlock` closes the final block in the `finally`; a free helper because TS can't narrow
+  the closure-mutated `answer`.)
 - **Status bar:** `model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a `bg` mode badge,
   fed by `UsageMeter` (on `usage` events) + `fetchBalance` (startup / `/model` / `/balance`). **Shown only
   when the sidebar is hidden** (the session panel carries the same fields, D29) — when the sidebar is up the
-  bar collapses (`height 0`) and the streaming `●` shows in the session panel instead.
+  bar collapses (`height 0`) and the working indicator shows in the session panel instead.
   See [usage](usage.md), [balance](balance.md).
+- **Working indicator (is it alive?):** while a turn runs, an **animated braille spinner** + `working`
+  shows on whichever surface is visible (session panel with the sidebar up, status bar otherwise),
+  advanced by a ~11 fps `activityTimer` (`spin`/`activityChunk`). The *motion* is the signal — a frozen
+  spinner means a stall. On **ESC** the label flips to a red **`stopping…`** immediately (`aborting`
+  latch) so the keypress visibly registers even before the in-flight stream/tool unwinds; when the turn
+  actually ends the indicator **disappears** (`busy=false`) — so the user always distinguishes working vs.
+  interrupting vs. stopped. The timer is cleared on `shutdown`.
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /models /mode /clear /compact /reload /sessions /resume /drop /balance /quit`
+- **Paste shortening:** a long (>200 char) or multi-line paste collapses to a `[Pasted N lines #id]`
+  token **at the cursor** (so the caret moves past it and you keep typing), with the full text stashed
+  under that id. On send, `expandPastes` substitutes each surviving token back **by id** — so deleting
+  or editing a token simply **drops that paste** (no effect on the others, undo-safe), and tokens needn't
+  stay in paste order. Logic in `affordances.ts` (`pasteToken`/`expandPastes`, tested); the `paste` event
+  handler in `app.ts` does the insert.
+- **Commands:** `/help /models /mode /mouse /clear /compact /reload /sessions /resume /drop /balance /quit`
   — **none take parameters**; what used to need an argument is now an **interactive picker** (`/help` is
   color-coded). System lines are consistently iconned: `·` info · `✦` ok · `⚠` warn · `✗` error.
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
@@ -70,13 +99,21 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   Takes effect from the next turn.
 - **Keys:** Enter with a popup open **accepts the highlighted suggestion** before acting — a `/`
   command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
-  and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
-  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **PgUp/PgDn scroll** · **Ctrl+B sidebar** ·
-  **Ctrl+R reload** · ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.)
-- **The terminal owns the mouse + clipboard** (`useMouse:false` + `useKittyKeyboard:null`): native
-  selection, `Ctrl+Shift+C/V`, and the right-click menu are the terminal's, not the app's. So there's no
-  mouse-wheel scroll (PgUp/PgDn instead), and `Shift+Enter` can't be distinguished from `Enter` without
-  Kitty (a multi-line newline would be Alt+Enter). See the [terminal-owns-the-mouse micro-default](../DECISIONS.md).
+  and stays open to drill in. With no popup, Enter just sends. · **Tab accepts a suggestion** (it does
+  **not** toggle the mode — only **Shift+Tab** / `/mode` do, to avoid an accidental mode flip) · ↑/↓
+  navigate · **Ctrl+↑/↓ (or Alt+↑/↓) scroll the transcript** (`key.preventDefault` so the key doesn't also
+  hit the input; the ScrollBox drops sticky-bottom on manual scroll) · **Ctrl+B sidebar** · **Ctrl+T todo
+  list** · **Ctrl+R reload** · ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.) Scroll keys are
+  deliberately ones ghostty **passes to the app** and the input's Textarea doesn't bind — **PgUp/PgDn were
+  dropped** (terminals like ghostty grab them for their own scrollback, so they never arrived); `Shift+↑/↓`
+  is avoided too (the input uses it for text-select).
+- **The terminal owns the mouse + clipboard by default** (`useMouse:false` + `useKittyKeyboard:null`):
+  native selection, `Ctrl+Shift+C/V`, and the right-click menu are the terminal's, not the app's — at the
+  cost of no mouse-wheel scroll (keyboard scroll instead). **`/mouse` toggles this at runtime**
+  (`renderer.useMouse`): ON → the **wheel scrolls the transcript** (OpenTUI's ScrollBox handles it), but the
+  app captures the mouse so selecting text needs **Shift+drag**; OFF (default) → native select + right-click
+  copy. Lets the user opt into the wheel only when wanted. `Shift+Enter` still can't be distinguished from
+  `Enter` without Kitty (newline is Alt+Enter). See the [terminal-owns-the-mouse micro-default](../DECISIONS.md).
 - **No redundant logs:** state changes that already have a visible indicator don't also print a transcript
   line — mode (PLAN/EDIT badge), model (`/model`, shown in the bar/panel), and the sidebar toggle are silent.
 
@@ -98,6 +135,11 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - ESC latency is now **timing-based everywhere** (Kitty disambiguation is off) — a lone ESC is
   recognized after a short delay vs. an escape sequence. Fine in Ghostty.
 - **Verify the keybinds still parse without Kitty**: Shift+Tab (mode) relies on the terminal's legacy
-  back-tab (`ESC[Z`) — if it stops toggling, plain Tab (no popup) and `/mode` are the fallbacks.
+  back-tab (`ESC[Z`) — if it stops toggling, **`/mode`** is the fallback (plain Tab no longer toggles).
+- **Scroll keys can be grabbed by the terminal:** ghostty binds `shift+page_up/down` (scrollback),
+  `ctrl+page_up/down` (tabs), `shift+home/end` (scroll) — those never reach the app (`ghostty
+  +list-keybinds` lists them). **Plain PgUp/PgDn turned out not to arrive either in practice, so they were
+  removed**; nerve scrolls on **Ctrl/Alt+↑/↓** (verified arriving). If a terminal grabs even those,
+  **`/mouse`** (wheel) is the fallback.
 
 **See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [affordances/D14](../DECISIONS.md) · [usage](usage.md) · [balance](balance.md)

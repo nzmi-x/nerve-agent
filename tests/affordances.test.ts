@@ -11,6 +11,7 @@ import {
   discoverSkills,
   loadSkillBody,
   pasteToken,
+  toolArgSummary,
   expandPastes,
 } from "../src/tui/affordances.ts";
 
@@ -53,7 +54,7 @@ test("atSuggestions: completes paths; dirs get '/'; dotfiles hidden unless asked
 
 test("slashSuggestions: prefix-matches builtins and skills", () => {
   const names = (q: string) => slashSuggestions(q, [{ name: "opentui", description: "" }]).map((c) => c.name);
-  expect(names("mo")).toEqual(["models", "mode"]);
+  expect(names("mo")).toEqual(["models", "mode", "mouse"]);
   expect(names("dr")).toEqual(["drop"]);
   expect(names("op")).toEqual(["opentui"]); // a skill
   expect(names("")).toContain("help");
@@ -78,20 +79,36 @@ test("discoverSkills: reads SKILL.md frontmatter + captures the path for lazy in
   expect(opentui!.path).toContain(join("opentui", "SKILL.md"));
 });
 
-test("pasteToken: collapses multi-line / long pastes, leaves short single-line as-is (#3)", () => {
-  expect(pasteToken("just a short line")).toBeNull();
-  expect(pasteToken("one short line\n")).toBeNull(); // a trailing newline alone is still 1 short line
-  expect(pasteToken("a\nb\nc")).toEqual({ token: "[Pasted 3 lines]", lines: 3 });
-  expect(pasteToken("a\nb\n")?.token).toBe("[Pasted 2 lines]"); // trailing newline ignored → 2 lines
-  expect(pasteToken("x".repeat(250))?.token).toBe("[Pasted 1 line]"); // long single line still collapses
+test("toolArgSummary: shows the salient arg per tool, quotes patterns, truncates, tolerates junk", () => {
+  expect(toolArgSummary("read", '{"path":"src/app.ts"}')).toBe("src/app.ts");
+  expect(toolArgSummary("bash", '{"command":"mkdir -p ./x && cat x"}')).toBe("mkdir -p ./x && cat x");
+  expect(toolArgSummary("grep", '{"pattern":"export fn","path":"src"}')).toBe('"export fn" in src');
+  expect(toolArgSummary("search", '{"query":"bun runtime"}')).toBe('"bun runtime"');
+  expect(toolArgSummary("lsp", '{"op":"hover","path":"a.py","line":3}')).toBe("hover a.py");
+  expect(toolArgSummary("manual", "{}")).toBe("(index)");
+  expect(toolArgSummary("task", '{"prompt":"find callers\\nof foo"}')).toBe("find callers");
+  expect(toolArgSummary("read", "not json")).toBe(""); // malformed → empty, no throw
+  expect(toolArgSummary("write", `{"path":"${"x".repeat(80)}"}`).endsWith("…")).toBe(true); // truncated
 });
 
-test("expandPastes: restores stashed pastes in order, clears the stash (#3)", () => {
-  const stash = ["FULL ONE", "FULL TWO"];
-  const out = expandPastes("see [Pasted 2 lines] and [Pasted 9 lines] please", stash);
-  expect(out).toBe("see FULL ONE and FULL TWO please");
-  expect(stash).toHaveLength(0); // consumed
-  expect(expandPastes("nothing to do", [])).toBe("nothing to do");
+test("pasteToken: line count for multi-line / long pastes, null for short single-line (#3)", () => {
+  expect(pasteToken("just a short line")).toBeNull();
+  expect(pasteToken("one short line\n")).toBeNull(); // a trailing newline alone is still 1 short line
+  expect(pasteToken("a\nb\nc")).toBe(3);
+  expect(pasteToken("a\nb\n")).toBe(2); // trailing newline ignored → 2 lines
+  expect(pasteToken("x".repeat(250))).toBe(1); // long single line still collapses
+});
+
+test("expandPastes: substitutes by id; a deleted token just drops its paste; clears the stash (#3)", () => {
+  const stash = new Map<number, string>([
+    [1, "FULL ONE"],
+    [2, "FULL TWO"],
+  ]);
+  // token #2 was deleted from the message → only #1 resolves, #2 is dropped (no order dependence)
+  const out = expandPastes("see [Pasted 2 lines #1] only please", stash);
+  expect(out).toBe("see FULL ONE only please");
+  expect(stash.size).toBe(0); // consumed
+  expect(expandPastes("nothing to do", new Map())).toBe("nothing to do");
 });
 
 test("loadSkillBody: strips frontmatter, returns the skill instructions (D12)", async () => {
