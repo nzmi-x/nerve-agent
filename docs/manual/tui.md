@@ -18,8 +18,9 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
   in place by the `todo` tool via `ctx.setTodos`; **hidden by default — `Ctrl+T` toggles it** (`todoVisible`/
   `renderTodoPanel`), since the sidebar carries a 1-line summary; a turn that **ends with todos unfinished**
-  prints a dim `· N todos still pending` line, since a model may stop early on a long task and an idle UI
-  otherwise reads as "done") · a `popup` `Box` (autosuggest
+  triggers a **bounded auto-continue** ([D34](../DECISIONS.md)) — nerve re-prompts the model to keep going
+  (≤8 rounds, stops on no progress / ESC) and prints a dim `· N todos still pending` hint only once it gives
+  up with work left) · a `popup` `Box` (autosuggest
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**

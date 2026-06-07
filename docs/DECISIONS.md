@@ -813,6 +813,29 @@ unwrapped); `parseResults` unit-tested offline (`tests/search.test.ts`).
 
 ---
 
+## D34 — Auto-continue: drive an unfinished todo list to completion (bounded)
+**Decision.** When a turn ends with the model's `todo` list unfinished, the TUI **re-prompts the model to
+keep going** instead of waiting for a human (`autoContinue` in `app.ts`, after each `sendPrompt` turn).
+**Bounded** so it can't run away: at most `MAX_AUTO_CONTINUE` (8) rounds per user message, and it stops the
+instant a round completes **no new todo** (no progress → the model's stuck), or there's no todo list, or
+`ESC` aborts. Each round injects a terse "continue your todos" user message and shows a dim `continuing · N
+left`; when it gives up with work left, a dim `stopped · N todos still pending` hint tells the user to nudge
+it themselves. Pairs with the [system prompt](../prompts/system.md)'s "finish the task in one turn" rule.
+**Why.** [D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)'s thesis is
+a self-hosting agent that **runs unattended** — but cheap/fast models (the default `deepseek-v4-flash`)
+reliably end a turn mid-plan (narrate a few steps, hit `task`, stop). The agent loop is correct (it runs
+until the model stops calling tools); the gap is the model's stamina. Re-nudging on a *tracked* todo list
+closes it without touching the loop, and the no-progress guard + round cap keep token spend bounded (a few
+cheap turns). Surfaced by the #2 self-test stalling at step 12/16 three runs straight.
+**Rejected.** An unbounded "loop until done" (runaway cost / infinite loop on a stuck model); auto-continuing
+**non-todo** turns (no completion signal to bound it — only a todo list defines "done"); driving it from the
+engine `loop` (it stays a pure, re-entrant function — continuation is TUI policy, kept in `app.ts`).
+**Refine later:** a config knob for the cap / opt-out, and a smarter stuck-signal than "no new todo this
+round" (which can stop early on a todo that legitimately spans turns).
+**Phase.** Built (Phase 1.5). Cap = 8 rounds; TUI-only (headless `index.ts` is one-shot by design).
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while

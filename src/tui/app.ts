@@ -966,18 +966,33 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer(); // breathing room before the assistant's answer
     session.addUser(modelText);
     await runAgentTurn();
-    // If the model ended the turn with todos unfinished, say so. Small/fast models lose the thread on long
-    // sequential tasks and stop early; the loop is correct (it ran until the model stopped calling tools),
-    // but an idle UI with work left otherwise reads as "done". Skip on ESC — that abort was intentional.
-    if (!turnAbort?.signal.aborted) {
-      const pending = currentTodos.filter((td) => td.status !== "completed").length;
-      if (pending) sysInfo(`turn ended · ${pending} todo${pending === 1 ? "" : "s"} still pending — send a message to continue`);
-    }
+    await autoContinue(); // D34: drive an unfinished todo list to completion (bounded), then flag any remainder
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     input.focus();
+  }
+
+  // D34: keep an unfinished todo list moving without a human nudge (nerve runs unattended, D11). A cheap
+  // model often ends a turn mid-plan; re-prompt it to continue. Bounded so it can't run away: ≤ MAX rounds,
+  // and stop the instant a round finishes no new todo (no progress → it's stuck). ESC breaks out. If work
+  // remains when we stop, a dim hint tells the user to nudge it on themselves.
+  const MAX_AUTO_CONTINUE = 8;
+  async function autoContinue(): Promise<void> {
+    for (let round = 0; round < MAX_AUTO_CONTINUE; round++) {
+      if (turnAbort?.signal.aborted) return;
+      const total = currentTodos.length;
+      const doneBefore = currentTodos.filter((td) => td.status === "completed").length;
+      if (!total || doneBefore === total) break; // no todo list, or all done — nothing to drive
+      session.addUser("Continue — work your remaining todos to completion. Don't stop to check in.");
+      sysInfo(`continuing · ${total - doneBefore} todo${total - doneBefore === 1 ? "" : "s"} left`);
+      await runAgentTurn();
+      if (currentTodos.filter((td) => td.status === "completed").length <= doneBefore) break; // no progress → stuck
+    }
+    if (turnAbort?.signal.aborted) return;
+    const pending = currentTodos.filter((td) => td.status !== "completed").length;
+    if (pending) sysInfo(`stopped · ${pending} todo${pending === 1 ? "" : "s"} still pending — send a message to continue`);
   }
 
   // D12: invoke a skill — load its SKILL.md body lazily (progressive disclosure), expand args like a
