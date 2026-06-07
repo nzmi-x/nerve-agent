@@ -5,6 +5,8 @@
 // derived for legibility on each ground. Detection is at **startup** (a relaunch re-detects — no live
 // follow); falls back to dark off-GNOME. `$NERVE_THEME=light|dark` forces one.
 
+import { SyntaxStyle, RGBA } from "@opentui/core";
+
 export interface Theme {
   FG: string;
   MUTE: string;
@@ -83,4 +85,31 @@ export function pickTheme(): Theme {
   if (forced === "light") return ADWAITA_LIGHT;
   if (forced === "dark") return ADWAITA_DARK;
   return prefersDark() ? ADWAITA_DARK : ADWAITA_LIGHT;
+}
+
+/** Map a palette to the markdown/code `SyntaxStyle`. Rebuilt on a live light/dark change (D30) so the
+ *  transcript's existing renderables re-colour when their `.syntaxStyle` is re-set. */
+export function buildSyntaxStyle(theme: Theme): SyntaxStyle {
+  return SyntaxStyle.fromStyles({
+    default: { fg: RGBA.fromHex(theme.FG) },
+    "markup.heading": { fg: RGBA.fromHex(theme.ACCENT), bold: true },
+    "markup.heading.1": { fg: RGBA.fromHex(theme.ACCENT), bold: true },
+    "markup.heading.2": { fg: RGBA.fromHex(theme.CYAN), bold: true },
+    "markup.bold": { fg: RGBA.fromHex(theme.YELLOW), bold: true },
+    "markup.italic": { italic: true },
+    "markup.list": { fg: RGBA.fromHex(theme.MAGENTA) },
+    "markup.raw": { fg: RGBA.fromHex(theme.GREEN) },
+    "markup.link": { fg: RGBA.fromHex(theme.CYAN), underline: true },
+    "markup.quote": { fg: RGBA.fromHex(theme.DIM), italic: true },
+    keyword: { fg: RGBA.fromHex(theme.MAGENTA) },
+    string: { fg: RGBA.fromHex(theme.GREEN) },
+    comment: { fg: RGBA.fromHex(theme.DIM), italic: true },
+    function: { fg: RGBA.fromHex(theme.ACCENT) },
+    number: { fg: RGBA.fromHex(theme.ORANGE) },
+    boolean: { fg: RGBA.fromHex(theme.ORANGE) },
+    type: { fg: RGBA.fromHex(theme.CYAN) },
+    property: { fg: RGBA.fromHex(theme.CYAN) },
+    operator: { fg: RGBA.fromHex(theme.CYAN) },
+    punctuation: { fg: RGBA.fromHex(theme.MUTE) },
+  });
 }

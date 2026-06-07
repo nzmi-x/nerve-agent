@@ -12,8 +12,6 @@ import {
   TextareaRenderable,
   defaultTextareaKeyBindings,
   MarkdownRenderable,
-  SyntaxStyle,
-  RGBA,
   TextAttributes,
   t,
   bold,
@@ -33,43 +31,19 @@ import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
-import { pickTheme } from "./theme.ts";
+import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
-// Palette — inherited from ghostty's Adwaita / Adwaita Dark, picked by the GNOME light/dark scheme (D30).
-// `let` (not `const`) so a live system light/dark change can reassign it and the UI re-themes in place.
-let { FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme();
-
-// Built from the current palette; rebuilt on a live theme change (D30) so existing markdown can re-theme.
-function buildSyntaxStyle(): SyntaxStyle {
-  return SyntaxStyle.fromStyles({
-    default: { fg: RGBA.fromHex(FG) },
-    "markup.heading": { fg: RGBA.fromHex(ACCENT), bold: true },
-    "markup.heading.1": { fg: RGBA.fromHex(ACCENT), bold: true },
-    "markup.heading.2": { fg: RGBA.fromHex(CYAN), bold: true },
-    "markup.bold": { fg: RGBA.fromHex(YELLOW), bold: true },
-    "markup.italic": { italic: true },
-    "markup.list": { fg: RGBA.fromHex(MAGENTA) },
-    "markup.raw": { fg: RGBA.fromHex(GREEN) },
-    "markup.link": { fg: RGBA.fromHex(CYAN), underline: true },
-    "markup.quote": { fg: RGBA.fromHex(DIM), italic: true },
-    keyword: { fg: RGBA.fromHex(MAGENTA) },
-    string: { fg: RGBA.fromHex(GREEN) },
-    comment: { fg: RGBA.fromHex(DIM), italic: true },
-    function: { fg: RGBA.fromHex(ACCENT) },
-    number: { fg: RGBA.fromHex(ORANGE) },
-    boolean: { fg: RGBA.fromHex(ORANGE) },
-    type: { fg: RGBA.fromHex(CYAN) },
-    property: { fg: RGBA.fromHex(CYAN) },
-    operator: { fg: RGBA.fromHex(CYAN) },
-    punctuation: { fg: RGBA.fromHex(MUTE) },
-  });
-}
-let syntaxStyle = buildSyntaxStyle();
+// Palette (D30) — the GNOME light/dark scheme's Adwaita colours, kept as one mutable object (not loose
+// consts) so a live light/dark flip can Object.assign new values in place and every reader — app.ts and
+// the extracted panel modules alike — sees them with no re-wiring. Read off the object (theme dot a name).
+// The colour → SyntaxStyle mapping lives in theme.ts now (rebuilt on a flip so old markdown re-colours).
+const theme = pickTheme();
+let syntaxStyle = buildSyntaxStyle(theme);
 
 type Content = string | ReturnType<typeof t>;
 
@@ -109,7 +83,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // Mouse capture stays off for good: the side panels break rectangular selection, so capturing the wheel
   // would cost native select + right-click copy for a scroll the keyboard already covers — a bad trade.
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30, useMouse: false, useKittyKeyboard: null });
-  renderer.setBackgroundColor(DARKFG);
+  renderer.setBackgroundColor(theme.DARKFG);
   const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
   const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
   // Hot-swappable leaf seams (D7): tool specs + interceptor factories. /reload re-imports them.
@@ -165,7 +139,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     width: "100%",
     border: true,
     borderStyle: "rounded",
-    borderColor: ACCENT, // the title (session name / "nerve") is drawn in the border colour — make it pop
+    borderColor: theme.ACCENT, // the title (session name / "nerve") is drawn in the border colour — make it pop
     title: " ◆ nerve ",
     paddingLeft: 1,
     paddingRight: 1,
@@ -181,12 +155,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     width: "100%",
     border: true,
     borderStyle: "rounded",
-    borderColor: BORDER,
+    borderColor: theme.BORDER,
     flexDirection: "row",
     paddingLeft: 1,
     paddingRight: 1,
   });
-  const prompt = new TextRenderable(renderer, { id: "prompt", content: "❯ ", fg: ACCENT, attributes: TextAttributes.BOLD });
+  const prompt = new TextRenderable(renderer, { id: "prompt", content: "❯ ", fg: theme.ACCENT, attributes: TextAttributes.BOLD });
   // Multi-line message box (#3): a Textarea (Enter sends, Alt+Enter inserts a newline — Shift+Enter needs
   // the Kitty protocol we turned off), growing 1→8 rows with content. No `value` accessor like the old
   // Input — read with `.plainText`, replace with `.setText`. Autosuggest + submit are wired via the
@@ -198,8 +172,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     maxHeight: 8,
     wrapMode: "word",
     placeholder: "Message · @file · !shell · /command · Alt+Enter newline",
-    textColor: FG,
-    cursorColor: ACCENT,
+    textColor: theme.FG,
+    cursorColor: theme.ACCENT,
     // Drop the default Enter→newline; Enter (send) and Alt+Enter (newline) are handled in the global
     // keypress handler, which definitely fires — so sending never depends on the Textarea's own binding.
     keyBindings: defaultTextareaKeyBindings.filter((b) => b.action !== "newline" || b.ctrl || b.shift || b.meta),
@@ -215,7 +189,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   inputBox.add(prompt);
   inputBox.add(input);
 
-  const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: PANEL });
+  const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: theme.PANEL });
 
   // The responsive sidebar (populated in the sidebar block below); created here so it joins the row.
   const sidebar = new BoxRenderable(renderer, { id: "sidebar", flexShrink: 0, width: 0, height: "100%", flexDirection: "column", paddingLeft: 1 });
@@ -246,11 +220,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const shown = currentTodos.slice(0, MAX_TODO_ROWS - 1);
       const done = currentTodos.filter((td) => td.status === "completed").length;
       const extra = currentTodos.length > shown.length ? `  +${currentTodos.length - shown.length}` : "";
-      rows.push(t`${bold(fg(ACCENT)("☑ todos"))} ${fg(MUTE)(currentTodos.length ? `· ${done}/${currentTodos.length}${extra}` : "· (none yet)")}`);
+      rows.push(t`${bold(fg(theme.ACCENT)("☑ todos"))} ${fg(theme.MUTE)(currentTodos.length ? `· ${done}/${currentTodos.length}${extra}` : "· (none yet)")}`);
       for (const td of shown) {
-        if (td.status === "completed") rows.push(t`${fg(GREEN)(" ✓")} ${fg(DIM)(td.content)}`);
-        else if (td.status === "in_progress") rows.push(t`${fg(YELLOW)(" ▸")} ${bold(fg(WHITE)(td.content))}`);
-        else rows.push(t`${fg(MUTE)(" ○")} ${fg(MUTE)(td.content)}`);
+        if (td.status === "completed") rows.push(t`${fg(theme.GREEN)(" ✓")} ${fg(theme.DIM)(td.content)}`);
+        else if (td.status === "in_progress") rows.push(t`${fg(theme.YELLOW)(" ▸")} ${bold(fg(theme.WHITE)(td.content))}`);
+        else rows.push(t`${fg(theme.MUTE)(" ○")} ${fg(theme.MUTE)(td.content)}`);
       }
     }
     for (let i = 0; i < todoRows.length; i++) {
@@ -291,13 +265,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     return rows;
   };
-  const sessionPanel = mkPanel("sessionPanel", " session ", () => CYAN);
-  const todosPanel = mkPanel("todosPanel", " todos ", () => ACCENT); // 1-line summary (full list is Ctrl+T)
-  const skillsPanel = mkPanel("skillsPanel", " skills ", () => MAGENTA);
-  const lspPanel = mkPanel("lspPanel", " lsp ", () => ACCENT);
-  const toolsPanel = mkPanel("toolsPanel", " tools ", () => GREEN);
-  const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => YELLOW);
-  const filesPanel = mkPanel("filesPanel", " files ", () => ORANGE, true);
+  const sessionPanel = mkPanel("sessionPanel", " session ", () => theme.CYAN);
+  const todosPanel = mkPanel("todosPanel", " todos ", () => theme.ACCENT); // 1-line summary (full list is Ctrl+T)
+  const skillsPanel = mkPanel("skillsPanel", " skills ", () => theme.MAGENTA);
+  const lspPanel = mkPanel("lspPanel", " lsp ", () => theme.ACCENT);
+  const toolsPanel = mkPanel("toolsPanel", " tools ", () => theme.GREEN);
+  const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => theme.YELLOW);
+  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE, true);
   for (const p of [sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
@@ -318,7 +292,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // the user always knows working vs. interrupting vs. stopped. Advanced by `activityTimer`.
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const activityChunk = (pad = false) =>
-    fg(aborting ? RED : YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
+    fg(aborting ? theme.RED : theme.YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
   // The 1-line todos panel (the full list is the Ctrl+T panel) — done/total + the current focus. A free
   // function so a `todo` write can refresh just this panel (`setTodos`) without rebuilding the whole sidebar.
   function renderTodoSummary(): void {
@@ -327,10 +301,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const done = currentTodos.filter((td) => td.status === "completed").length;
       const inProg = currentTodos.find((td) => td.status === "in_progress");
       const next = inProg ?? currentTodos.find((td) => td.status === "pending");
-      const icon = inProg ? fg(YELLOW)("▸") : next ? fg(MUTE)("○") : fg(GREEN)("✓");
-      todoSumRows[0]!.content = t`${icon} ${fg(MUTE)(`${done}/${currentTodos.length}`)} ${fg(FG)(trunc(next ? next.content : "all done", W - 6))}`;
+      const icon = inProg ? fg(theme.YELLOW)("▸") : next ? fg(theme.MUTE)("○") : fg(theme.GREEN)("✓");
+      todoSumRows[0]!.content = t`${icon} ${fg(theme.MUTE)(`${done}/${currentTodos.length}`)} ${fg(theme.FG)(trunc(next ? next.content : "all done", W - 6))}`;
     } else {
-      todoSumRows[0]!.content = t`${fg(DIM)("(no todos)")}`;
+      todoSumRows[0]!.content = t`${fg(theme.DIM)("(no todos)")}`;
     }
     todosPanel.height = 3; // 1 summary row + border
   }
@@ -338,11 +312,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
     // session panel: model · mode · cost · ctx · bal (the title now lives in the transcript box border).
-    sessionRows[0]!.content = t`${fg(MUTE)("model ")}${fg(FG)(trunc(active.id, W - 6))}`;
-    sessionRows[1]!.content = mode === "edit" ? t`${fg(MUTE)("mode  ")}${bg(GREEN)(fg(DARKFG)(" EDIT "))}` : t`${fg(MUTE)("mode  ")}${bg(YELLOW)(fg(DARKFG)(" PLAN "))}`;
-    sessionRows[2]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
-    sessionRows[3]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
-    sessionRows[4]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
+    sessionRows[0]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(active.id, W - 6))}`;
+    sessionRows[1]!.content = mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
+    sessionRows[2]!.content = t`${fg(theme.MUTE)("cost  ")}${fg(theme.FG)(formatCost(s.costUsd))}`;
+    sessionRows[3]!.content = t`${fg(theme.MUTE)("ctx   ")}${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}`;
+    sessionRows[4]!.content = t`${fg(theme.MUTE)("bal   ")}${fg(theme.GREEN)(formatBalance(balance))}`;
     sessionRows[5]!.content = busy ? t`${activityChunk()}` : ""; // animated working/stopping indicator
     sessionRows[5]!.height = busy ? 1 : 0;
     sessionPanel.height = (busy ? 6 : 5) + 2; // grows by the streaming row + border
@@ -353,7 +327,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     for (let i = 0; i < skillRows.length; i++) {
       const tr = skillRows[i]!;
       if (i < skills.length) {
-        tr.content = t`${fg(MAGENTA)("◆")} ${fg(FG)(trunc(skills[i]!, W - 2))}`;
+        tr.content = t`${fg(theme.MAGENTA)("◆")} ${fg(theme.FG)(trunc(skills[i]!, W - 2))}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -368,11 +342,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const tr = lspRows[i]!;
       if (i < lspServers.length) {
         const ls = lspServers[i]!;
-        const icon = ls.state === "running" ? fg(GREEN)("●") : ls.state === "spawning" ? fg(YELLOW)("◌") : fg(RED)("✗");
-        tr.content = t`${icon} ${fg(FG)(trunc(ls.id, W - 2))}`;
+        const icon = ls.state === "running" ? fg(theme.GREEN)("●") : ls.state === "spawning" ? fg(theme.YELLOW)("◌") : fg(theme.RED)("✗");
+        tr.content = t`${icon} ${fg(theme.FG)(trunc(ls.id, W - 2))}`;
         tr.height = 1;
       } else if (i === 0) {
-        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -387,11 +361,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const tr = toolRows[i]!;
       if (i < toolWin.length) {
         const tc = toolWin[i]!;
-        const icon = tc.status === "running" ? fg(YELLOW)("●") : tc.status === "ok" ? fg(GREEN)("✓") : fg(RED)("✗");
-        tr.content = t`${icon} ${fg(FG)(trunc(tc.name, W - 2))}`;
+        const icon = tc.status === "running" ? fg(theme.YELLOW)("●") : tc.status === "ok" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
+        tr.content = t`${icon} ${fg(theme.FG)(trunc(tc.name, W - 2))}`;
         tr.height = 1;
       } else if (i === 0) {
-        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -406,11 +380,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const tr = subagentRows[i]!;
       if (i < subWin.length) {
         const sa = subWin[i]!;
-        const icon = sa.status === "running" ? fg(YELLOW)("●") : sa.status === "done" ? fg(GREEN)("✓") : fg(RED)("✗");
-        tr.content = t`${icon} ${fg(MUTE)(trunc(sa.prompt, W - 2))}`;
+        const icon = sa.status === "running" ? fg(theme.YELLOW)("●") : sa.status === "done" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
+        tr.content = t`${icon} ${fg(theme.MUTE)(trunc(sa.prompt, W - 2))}`;
         tr.height = 1;
       } else if (i === 0) {
-        tr.content = t`${fg(DIM)("(none)")}`;
+        tr.content = t`${fg(theme.DIM)("(none)")}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -428,10 +402,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       if (i < Math.min(files.length, cap)) {
         const f = files[i]!;
         const name = trunc(relative(cwd, f) || f, W - 2);
-        tr.content = sessionEdited.has(f) ? t`${fg(YELLOW)("✎")} ${fg(FG)(name)}` : t`${fg(DIM)("·")} ${fg(MUTE)(name)}`;
+        tr.content = sessionEdited.has(f) ? t`${fg(theme.YELLOW)("✎")} ${fg(theme.FG)(name)}` : t`${fg(theme.DIM)("·")} ${fg(theme.MUTE)(name)}`;
         tr.height = 1;
       } else if (i === 0) {
-        tr.content = t`${fg(DIM)("(none yet)")}`;
+        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -469,13 +443,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const lines: Line[] = [];
   // Styled line whose colours live in its content (a `t`…` thunk) — re-run verbatim on a theme change.
   const addText = (make: () => Content): TextRenderable => {
-    const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: make(), fg: FG });
+    const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: make(), fg: theme.FG });
     transcript.add(el);
     lines.push({ kind: "text", el, make });
     return el;
   };
   // Plain-text line tinted by one role colour (recoloured via `fg`); supports `.content +=` growth.
-  const addPlain = (text: string, role: () => string = () => FG, attributes = 0): TextRenderable => {
+  const addPlain = (text: string, role: () => string = () => theme.FG, attributes = 0): TextRenderable => {
     const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: text, fg: role(), attributes });
     transcript.add(el);
     lines.push({ kind: "plain", el, role });
@@ -503,35 +477,35 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const sealBlock = (m: MarkdownRenderable | null): void => void (m && (m.streaming = false));
   const spacer = (): void => void addText(() => "");
   // A faint full-width divider between turns. Width is recomputed per render (theme change / next paint).
-  const rule = (): void => void addText(() => t`${fg(DIM)("─".repeat(Math.max(4, (transcriptBox.width || renderer.width) - 4)))}`);
+  const rule = (): void => void addText(() => t`${fg(theme.DIM)("─".repeat(Math.max(4, (transcriptBox.width || renderer.width) - 4)))}`);
   // Consistent, color-coded system lines: info (· dim), ok (✦ magenta), warn (⚠ yellow), err (✗ red).
-  const sysInfo = (msg: string): void => void addText(() => t`${fg(DIM)("·")} ${fg(MUTE)(msg)}`);
-  const sysOk = (msg: string): void => void addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(msg)}`);
-  const sysWarn = (msg: string): void => void addText(() => t`${fg(YELLOW)("⚠")} ${fg(MUTE)(msg)}`);
-  const sysErr = (msg: string): void => void addText(() => t`${fg(RED)("✗")} ${fg(RED)(msg)}`);
-  const welcome = (): void => void addText(() => t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
+  const sysInfo = (msg: string): void => void addText(() => t`${fg(theme.DIM)("·")} ${fg(theme.MUTE)(msg)}`);
+  const sysOk = (msg: string): void => void addText(() => t`${fg(theme.MAGENTA)("✦")} ${fg(theme.MUTE)(msg)}`);
+  const sysWarn = (msg: string): void => void addText(() => t`${fg(theme.YELLOW)("⚠")} ${fg(theme.MUTE)(msg)}`);
+  const sysErr = (msg: string): void => void addText(() => t`${fg(theme.RED)("✗")} ${fg(theme.RED)(msg)}`);
+  const welcome = (): void => void addText(() => t`${fg(theme.ACCENT)("✦")} ${fg(theme.MUTE)("welcome to nerve")} ${fg(theme.DIM)("· /help for commands")}`);
   const clearTranscript = (): void => {
     for (const l of lines) transcript.remove(l.el.id);
     lines.length = 0;
   };
   // Re-theme the whole UI in place after a live light/dark switch (D30). Idle-only (deferred while busy).
   const retheme = (): void => {
-    ({ FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme());
-    syntaxStyle = buildSyntaxStyle();
-    renderer.setBackgroundColor(DARKFG);
-    transcriptBox.borderColor = ACCENT; // titled panels keep their accent border (the title rides on it)
-    inputBox.borderColor = BORDER;
-    sessionPanel.borderColor = CYAN;
-    todosPanel.borderColor = ACCENT;
-    skillsPanel.borderColor = MAGENTA;
-    lspPanel.borderColor = ACCENT;
-    toolsPanel.borderColor = GREEN;
-    subagentsPanel.borderColor = YELLOW;
-    filesPanel.borderColor = ORANGE;
-    status.bg = PANEL;
-    prompt.fg = ACCENT;
-    input.textColor = FG;
-    input.cursorColor = ACCENT;
+    Object.assign(theme, pickTheme());
+    syntaxStyle = buildSyntaxStyle(theme);
+    renderer.setBackgroundColor(theme.DARKFG);
+    transcriptBox.borderColor = theme.ACCENT; // titled panels keep their accent border (the title rides on it)
+    inputBox.borderColor = theme.BORDER;
+    sessionPanel.borderColor = theme.CYAN;
+    todosPanel.borderColor = theme.ACCENT;
+    skillsPanel.borderColor = theme.MAGENTA;
+    lspPanel.borderColor = theme.ACCENT;
+    toolsPanel.borderColor = theme.GREEN;
+    subagentsPanel.borderColor = theme.YELLOW;
+    filesPanel.borderColor = theme.ORANGE;
+    status.bg = theme.PANEL;
+    prompt.fg = theme.ACCENT;
+    input.textColor = theme.FG;
+    input.cursorColor = theme.ACCENT;
     for (const l of lines) {
       if (l.kind === "text") l.el.content = l.make();
       else if (l.kind === "plain") l.el.fg = l.role();
@@ -566,7 +540,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       try {
         for await (const chunk of themeMonitor!.stdout as ReadableStream<Uint8Array>) {
           void chunk;
-          if (pickTheme().DARKFG !== DARKFG) requestRetheme(); // ground actually flipped
+          if (pickTheme().DARKFG !== theme.DARKFG) requestRetheme(); // ground actually flipped
         }
       } catch {
         /* monitor ended — keep the current theme */
@@ -578,16 +552,16 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     for (const m of messages) {
       if (m.role === "user") {
         spacer();
-        addText(() => t`${bold(fg(GREEN)("❯"))} ${m.content}`);
+        addText(() => t`${bold(fg(theme.GREEN)("❯"))} ${m.content}`);
       } else if (m.role === "assistant") {
         if (m.content) {
           const md = addMarkdown();
           md.content = m.content;
           md.streaming = false;
         }
-        for (const tc of m.toolCalls ?? []) addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(tc.name)}`);
+        for (const tc of m.toolCalls ?? []) addText(() => t`${fg(theme.DIM)("⎿")} ${fg(theme.MUTE)(tc.name)}`);
       } else if (m.role === "tool") {
-        addText(() => t`${fg(DIM)("⎿")} ${fg(DIM)(firstLine(m.content))}`);
+        addText(() => t`${fg(theme.DIM)("⎿")} ${fg(theme.DIM)(firstLine(m.content))}`);
       }
     }
   };
@@ -598,7 +572,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const MAX_POPUP = 12;
   const popupRows: TextRenderable[] = [];
   for (let i = 0; i < MAX_POPUP; i++) {
-    const tr = new TextRenderable(renderer, { id: `pop-${i}`, content: "", height: 0, fg: MUTE });
+    const tr = new TextRenderable(renderer, { id: `pop-${i}`, content: "", height: 0, fg: theme.MUTE });
     popup.add(tr);
     popupRows.push(tr);
   }
@@ -608,7 +582,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       const tr = popupRows[i]!;
       const row = i < n ? rows[i]! : null;
       tr.content = row ? row.content : "";
-      tr.fg = row ? row.fg : MUTE;
+      tr.fg = row ? row.fg : theme.MUTE;
       tr.bg = row?.bg ?? "transparent";
       tr.attributes = row?.bold ? TextAttributes.BOLD : 0;
       tr.height = row ? 1 : 0;
@@ -628,8 +602,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     setPopup(
       suggest.items.map((it, i) => ({
         content: it.desc ? `${it.name.padEnd(colW)}${trunc(it.desc, budget)}` : it.name,
-        fg: i === suggest.sel ? WHITE : MUTE,
-        bg: i === suggest.sel ? SELBG : undefined,
+        fg: i === suggest.sel ? theme.WHITE : theme.MUTE,
+        bg: i === suggest.sel ? theme.SELBG : undefined,
         bold: i === suggest.sel,
       })),
     );
@@ -659,10 +633,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   const renderAsk = (): void => {
     if (!asking) return;
-    const rows: PopupRow[] = [{ content: `? ${asking.req.question}`, fg: ACCENT, bold: true }];
+    const rows: PopupRow[] = [{ content: `? ${asking.req.question}`, fg: theme.ACCENT, bold: true }];
     asking.req.options.forEach((o, i) => {
       const sel = i === asking!.sel;
-      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${trunc(o.description, Math.max(20, renderer.width - 28))}` : ""}`, fg: sel ? WHITE : MUTE, bg: sel ? SELBG : undefined, bold: sel });
+      rows.push({ content: `${o.label}${o.recommended ? "   (recommended)" : ""}${o.description ? `   ${trunc(o.description, Math.max(20, renderer.width - 28))}` : ""}`, fg: sel ? theme.WHITE : theme.MUTE, bg: sel ? theme.SELBG : undefined, bold: sel });
     });
     setPopup(rows);
   };
@@ -676,12 +650,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   const renderPicker = (): void => {
     if (!picker) return;
-    const rows: PopupRow[] = [{ content: picker.title, fg: ACCENT, bold: true }];
+    const rows: PopupRow[] = [{ content: picker.title, fg: theme.ACCENT, bold: true }];
     picker.items.forEach((it, i) => {
       const sel = i === picker!.sel;
       const label = `${it.current ? "● " : "  "}${it.label}`;
       const desc = it.desc ? `   ${trunc(it.desc, Math.max(16, renderer.width - label.length - 14))}` : "";
-      rows.push({ content: `${label}${desc}`, fg: sel ? WHITE : it.current ? GREEN : MUTE, bg: sel ? SELBG : undefined, bold: sel });
+      rows.push({ content: `${label}${desc}`, fg: sel ? theme.WHITE : it.current ? theme.GREEN : theme.MUTE, bg: sel ? theme.SELBG : undefined, bold: sel });
     });
     setPopup(rows);
   };
@@ -699,8 +673,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // --- status ---------------------------------------------------------------
   const setStatus = (): void => {
     const s = meter.snapshot();
-    const badge = mode === "edit" ? bg(GREEN)(fg(DARKFG)(" EDIT ")) : bg(YELLOW)(fg(DARKFG)(" PLAN "));
-    status.content = t` ${fg(ACCENT)(active.id)}  ${badge}  ${fg(MUTE)("cost")} ${fg(FG)(formatCost(s.costUsd))}  ${fg(MUTE)("ctx")} ${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(MUTE)("bal")} ${fg(GREEN)(formatBalance(balance))}${busy ? activityChunk(true) : ""}`;
+    const badge = mode === "edit" ? bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT ")) : bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "));
+    status.content = t` ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
@@ -723,9 +697,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function runShell(cmd: string): Promise<void> {
     const c = cmd.trim();
     if (!c) return;
-    addText(() => t`${bold(fg(YELLOW)("$"))} ${c}`);
+    addText(() => t`${bold(fg(theme.YELLOW)("$"))} ${c}`);
     try {
-      addPlain(await bash.run({ command: c }, { cwd }), () => MUTE); // full authority, ungated, not added to the session
+      addPlain(await bash.run({ command: c }, { cwd }), () => theme.MUTE); // full authority, ungated, not added to the session
     } catch (e) {
       sysErr(e instanceof Error ? e.message : String(e));
     }
@@ -742,16 +716,16 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     busy = true;
     setStatus();
-    const note = addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)("compacting…")}`);
+    const note = addText(() => t`${fg(theme.MAGENTA)("✦")} ${fg(theme.MUTE)("compacting…")}`);
     turnAbort = new AbortController();
     try {
       const input = pruneToolOutputs(session.messages.slice(0, cut)).messages; // shrink the summarizer's input
       const keep = session.messages.length - cut;
       const summary = await summarize(provider, active.id, input, compactionPrompt, "", turnAbort.signal);
       session.compact(summary, keep);
-      setText(note, () => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`);
+      setText(note, () => t`${fg(theme.MAGENTA)("✦")} ${fg(theme.MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`);
     } catch (e) {
-      setText(note, () => t`${fg(RED)("✗")} ${fg(MUTE)(`compaction failed: ${e instanceof Error ? e.message : String(e)}`)}`);
+      setText(note, () => t`${fg(theme.RED)("✗")} ${fg(theme.MUTE)(`compaction failed: ${e instanceof Error ? e.message : String(e)}`)}`);
     } finally {
       busy = false;
       turnAbort = null;
@@ -772,7 +746,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       icErr = e instanceof Error ? e.message : String(e);
     }
     if (rt.ok) tools = toolSpecs(); // refresh provider-facing specs for the next turn
-    if (rt.ok && !icErr) addText(() => t`${fg(GREEN)("↻")} ${fg(MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
+    if (rt.ok && !icErr) addText(() => t`${fg(theme.GREEN)("↻")} ${fg(theme.MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
     else sysErr(`reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`);
   }
 
@@ -858,9 +832,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   // Color-coded /help: section headers (accent), command names (cyan), keys (yellow), descriptions (muted).
   function renderHelp(): void {
-    const sec = (s: string): void => void addText(() => t`${bold(fg(ACCENT)(s))}`);
-    const cmd = (name: string, desc: string): void => void addText(() => t`  ${fg(CYAN)(name.padEnd(18))} ${fg(MUTE)(desc)}`);
-    const key = (k: string, desc: string): void => void addText(() => t`  ${fg(YELLOW)(k.padEnd(16))} ${fg(MUTE)(desc)}`);
+    const sec = (s: string): void => void addText(() => t`${bold(fg(theme.ACCENT)(s))}`);
+    const cmd = (name: string, desc: string): void => void addText(() => t`  ${fg(theme.CYAN)(name.padEnd(18))} ${fg(theme.MUTE)(desc)}`);
+    const key = (k: string, desc: string): void => void addText(() => t`  ${fg(theme.YELLOW)(k.padEnd(16))} ${fg(theme.MUTE)(desc)}`);
     spacer();
     sec("commands");
     cmd("/help", "this help");
@@ -899,7 +873,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     key("Alt+B / Alt+F", "word back / forward");
     spacer();
     sec("copy / paste");
-    addText(() => t`  ${fg(MUTE)("selection, Ctrl+Shift+C/V, and right-click are your terminal's")}`);
+    addText(() => t`  ${fg(theme.MUTE)("selection, Ctrl+Shift+C/V, and right-click are your terminal's")}`);
   }
 
   async function runCommand(value: string): Promise<void> {
@@ -942,7 +916,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return;
       case "balance":
         await refreshBalance();
-        addText(() => t`${fg(MUTE)("balance")}  ${fg(GREEN)(formatBalance(balance))}${active.provider === "gemini" ? fg(DIM)("  (Gemini has no balance API)") : ""}`);
+        addText(() => t`${fg(theme.MUTE)("balance")}  ${fg(theme.GREEN)(formatBalance(balance))}${active.provider === "gemini" ? fg(theme.DIM)("  (Gemini has no balance API)") : ""}`);
         return;
       case "resume":
         return void resumeSession(); // last session only — pick a specific one from /sessions
@@ -973,7 +947,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     pasteSeq = 0;
     if (raw.startsWith("!")) return void runShell(expanded.slice(1));
     if (raw.startsWith("/")) return void runCommand(raw); // commands run literally (paste tokens pass through)
-    await sendPrompt(expanded, () => t`${bold(fg(GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
+    await sendPrompt(expanded, () => t`${bold(fg(theme.GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
   }
 
   // Send a prompt to the agent: echo a transcript line, persist the (possibly longer) model text, run a turn.
@@ -1008,7 +982,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       return void sysErr(`couldn't load skill "${skill.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
     if (!body) return void sysErr(`skill "${skill.name}" is empty`);
-    await sendPrompt(expandCommand(body, args), () => t`${bold(fg(GREEN)("❯"))} ${fg(MUTE)(`/${skill.name}`)} ${fg(DIM)("(skill)")}`);
+    await sendPrompt(expandCommand(body, args), () => t`${bold(fg(theme.GREEN)("❯"))} ${fg(theme.MUTE)(`/${skill.name}`)} ${fg(theme.DIM)("(skill)")}`);
   }
 
   // One agent turn: stream → tools → post-edit hooks → (D24) hand failing checks back so the agent
@@ -1053,7 +1027,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           ic.reasoningRouter((d) => {
             if (!reasoningLine) {
               gapIfNeeded();
-              reasoningLine = addPlain("✻ ", () => DIM, TextAttributes.ITALIC);
+              reasoningLine = addPlain("✻ ", () => theme.DIM, TextAttributes.ITALIC);
             }
             reasoningLine.content += d;
           }),
@@ -1099,7 +1073,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           // error message tails it (the arg alone isn't enough to know what went wrong).
           const arg = argSummaries.get(id) ?? "";
           const tail = ok ? "" : `  ${firstLine(result)}`;
-          addText(() => t`${fg(ok ? GREEN : RED)("⎿")} ${fg(ok ? CYAN : RED)(name)}  ${fg(ok ? MUTE : RED)(arg)}${fg(RED)(tail)}`);
+          addText(() => t`${fg(ok ? theme.GREEN : theme.RED)("⎿")} ${fg(ok ? theme.CYAN : theme.RED)(name)}  ${fg(ok ? theme.MUTE : theme.RED)(arg)}${fg(theme.RED)(tail)}`);
           proseGap = true; // a tool just printed → the next prose block gets a blank line above it
         },
         onRetry: ({ delayMs, model }) => {
@@ -1108,7 +1082,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           answer = null; // the retried attempt opens a fresh block on its first text delta
           gapLine = null;
           reasoningLine = null;
-          addText(() => t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
+          addText(() => t`${fg(theme.YELLOW)("↻")} ${fg(theme.MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
         },
         onError: (e) => sysErr(e instanceof Error ? e.message : String(e)),
       });
@@ -1129,7 +1103,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     let issues = false;
     for (const pack of activePacks(edited)) {
       const files = [...edited].filter((f) => langForFile(f) === pack);
-      const note = addText(() => t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
+      const note = addText(() => t`${fg(theme.DIM)("⚙")} ${fg(theme.MUTE)(`post-edit (${pack.id})…`)}`);
       // surface each hook (ruff format, prettier --write, pyrefly check, …) in the tools panel as it runs
       const res = await runHooks(pack, files, cwd, (name) => {
         const id = `hook-${lineId++}`;
@@ -1141,7 +1115,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           renderSidebar();
         };
       });
-      if (res.summary) setText(note, () => t`${fg(MUTE)(res.summary)}`);
+      if (res.summary) setText(note, () => t`${fg(theme.MUTE)(res.summary)}`);
       if (res.summary) summaries.push(res.summary);
       issues ||= res.issues;
     }
@@ -1153,7 +1127,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     // Hand the failing checks back; the agent triages (fix critical/quick, defer non-critical).
     session.addUser(triagePrompt(summaries));
-    addText(() => t`${fg(YELLOW)("↪")} ${fg(MUTE)("post-edit checks failed — agent triaging…")}`);
+    addText(() => t`${fg(theme.YELLOW)("↪")} ${fg(theme.MUTE)("post-edit checks failed — agent triaging…")}`);
     await runAgentTurn(issueSummary);
   }
 
@@ -1308,7 +1282,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
-  addText(() => t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
+  addText(() => t`${fg(theme.ACCENT)("✦")} ${fg(theme.MUTE)("welcome to nerve")} ${fg(theme.DIM)("· /help for commands")}`);
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
