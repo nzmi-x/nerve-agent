@@ -158,7 +158,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     width: "100%",
     border: true,
     borderStyle: "rounded",
-    borderColor: BORDER,
+    borderColor: ACCENT, // the title (session name / "nerve") is drawn in the border colour — make it pop
     title: " ◆ nerve ",
     paddingLeft: 1,
     paddingRight: 1,
@@ -261,8 +261,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
   const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
   const toolCalls: { id: string; name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
-  const mkPanel = (id: string, title: string, grow = false): BoxRenderable =>
-    new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: BORDER, title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
+  // The panel **title takes the border colour** (OpenTUI has no separate title colour), so each panel gets
+  // a distinct accent — both to make the titles readable (they blended into the bg) and to tell them apart.
+  const mkPanel = (id: string, title: string, color: () => string, grow = false): BoxRenderable =>
+    new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: color(), title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
   const mkRows = (panel: BoxRenderable, n: number, prefix: string, h: number): TextRenderable[] => {
     const rows: TextRenderable[] = [];
     for (let i = 0; i < n; i++) {
@@ -272,13 +274,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     return rows;
   };
-  const sessionPanel = mkPanel("sessionPanel", " session ");
-  const skillsPanel = mkPanel("skillsPanel", " skills ");
-  const toolsPanel = mkPanel("toolsPanel", " tools ");
-  const subagentsPanel = mkPanel("subagentsPanel", " subagents ");
-  const filesPanel = mkPanel("filesPanel", " files ", true);
+  const sessionPanel = mkPanel("sessionPanel", " session ", () => CYAN);
+  const skillsPanel = mkPanel("skillsPanel", " skills ", () => MAGENTA);
+  const toolsPanel = mkPanel("toolsPanel", " tools ", () => GREEN);
+  const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => YELLOW);
+  const filesPanel = mkPanel("filesPanel", " files ", () => ORANGE, true);
   for (const p of [sessionPanel, skillsPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
-  const SESSION_ROWS = 7; // title, blank, model, mode, cost, ctx, bal
+  const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
   const TOOL_ROWS = 6;
   const SUB_ROWS = 6;
@@ -288,17 +290,18 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
   const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
   const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
-  sessionPanel.height = SESSION_ROWS + 2; // + border
   function renderSidebar(): void {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
-    sessionRows[0]!.content = t`${bold(fg(CYAN)(trunc(session.title || "untitled", W)))}`;
-    sessionRows[1]!.content = busy ? t`${fg(YELLOW)("● streaming")}` : ""; // status bar is hidden while the sidebar shows
-    sessionRows[2]!.content = t`${fg(MUTE)("model ")}${fg(FG)(trunc(active.id, W - 6))}`;
-    sessionRows[3]!.content = mode === "edit" ? t`${fg(MUTE)("mode  ")}${bg(GREEN)(fg(DARKFG)(" EDIT "))}` : t`${fg(MUTE)("mode  ")}${bg(YELLOW)(fg(DARKFG)(" PLAN "))}`;
-    sessionRows[4]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
-    sessionRows[5]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
-    sessionRows[6]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
+    // session panel: model · mode · cost · ctx · bal (the title now lives in the transcript box border).
+    sessionRows[0]!.content = t`${fg(MUTE)("model ")}${fg(FG)(trunc(active.id, W - 6))}`;
+    sessionRows[1]!.content = mode === "edit" ? t`${fg(MUTE)("mode  ")}${bg(GREEN)(fg(DARKFG)(" EDIT "))}` : t`${fg(MUTE)("mode  ")}${bg(YELLOW)(fg(DARKFG)(" PLAN "))}`;
+    sessionRows[2]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
+    sessionRows[3]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
+    sessionRows[4]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
+    sessionRows[5]!.content = busy ? t`${fg(YELLOW)("● streaming")}` : ""; // only while a turn runs
+    sessionRows[5]!.height = busy ? 1 : 0;
+    sessionPanel.height = (busy ? 6 : 5) + 2; // grows by the streaming row + border
     // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
     const skills = activeSkillNames(langTouched).slice(0, SKILL_ROWS);
     for (let i = 0; i < skillRows.length; i++) {
@@ -353,7 +356,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
     // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
     const files = [...langTouched].reverse();
-    const usedAbove = SESSION_ROWS + 2 + (skills.length + 2) + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
+    const usedAbove = sessionPanel.height + (skills.length + 2) + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
     const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
@@ -446,13 +449,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     ({ FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme());
     syntaxStyle = buildSyntaxStyle();
     renderer.setBackgroundColor(DARKFG);
-    transcriptBox.borderColor = BORDER;
+    transcriptBox.borderColor = ACCENT; // titled panels keep their accent border (the title rides on it)
     inputBox.borderColor = BORDER;
-    sessionPanel.borderColor = BORDER;
-    skillsPanel.borderColor = BORDER;
-    toolsPanel.borderColor = BORDER;
-    subagentsPanel.borderColor = BORDER;
-    filesPanel.borderColor = BORDER;
+    sessionPanel.borderColor = CYAN;
+    skillsPanel.borderColor = MAGENTA;
+    toolsPanel.borderColor = GREEN;
+    subagentsPanel.borderColor = YELLOW;
+    filesPanel.borderColor = ORANGE;
     status.bg = PANEL;
     prompt.fg = ACCENT;
     input.textColor = FG;

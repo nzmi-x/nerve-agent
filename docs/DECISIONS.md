@@ -671,8 +671,11 @@ methods (read-only for now). **Refine later:** swap the regex converter for Bun'
 ## D29 — Responsive TUI: main column + collapsible sidebar (web-app mindset)
 **Decision.** The TUI root is a flex **row**, not a column: a **`mainCol`** (`flexGrow:1`, `minWidth:0`)
 holding the existing stack (transcript · todo panel · popup · input · status bar) plus a fixed-width
-(**34-col**) **`sidebar`** beside it with stacked bordered panels — **session** (title · model · mode
-badge · cost · ctx · balance, mirroring the status bar), **skills** (the skills *loaded into context now*:
+(**34-col**) **`sidebar`** beside it with stacked bordered panels, each given a **distinct accent border**
+(the box title is drawn in the border colour — OpenTUI has no separate title colour — so this is what makes
+the titles legible + tells the panels apart: session=cyan, skills=magenta, tools=green, subagents=yellow,
+files=orange; transcript box=accent). **session** (model · mode badge · cost · ctx · balance — the *session
+title* moved to the transcript box header, `nerve` until auto-titled), **skills** (the skills *loaded into context now*:
 the always-on defaults + active language packs, `activeSkillNames`), **tools** (the main agent's tool
 calls this session + status — `●` running · `✓` ok · `✗` error, fed by the loop's `onToolStart`/
 `onToolResult`), **subagents** (this session's `task` runs + status `●`/`✓`/`✗`, [D6](#d6--subagents-a-read-only-task-tool-over-the-re-entrant-loop)), and **files**

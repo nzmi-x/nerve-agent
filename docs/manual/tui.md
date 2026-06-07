@@ -19,8 +19,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a `popup` `Box` (autosuggest
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
-- **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels — **session** (title · model · mode badge ·
-  cost · ctx · balance, mirroring the status bar), **skills** (the skills *loaded into context now* —
+- **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**
+  (the title rides on the border colour — session=cyan, skills=magenta, tools=green, subagents=yellow,
+  files=orange; the transcript box is accent-blue). **session** (model · mode badge · cost · ctx · balance —
+  the *session title* lives in the transcript box header, not here), **skills** (the skills *loaded into context now* —
   always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
   this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
   session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and **files** (touched files,
