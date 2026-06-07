@@ -2,9 +2,9 @@
 // with a fresh session + a cheaper profile" (D6). One turn = stream → interceptors → accumulate →
 // dispatch any tool calls → repeat until the model stops calling tools. See ARCHITECTURE_BRIEF §3.
 import { pipe, type Interceptor } from "./stream.ts";
-import { dispatch, type Mode } from "./dispatch.ts";
+import { dispatch, isReadOnlyTool, type Mode } from "./dispatch.ts";
 import { isTransient, isContextOverflow, backoffMs, sleep } from "./retry.ts";
-import type { Provider, ProviderRequest, StreamEvent, ToolSpec } from "./providers/types.ts";
+import type { Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec } from "./providers/types.ts";
 import type { Session } from "./session.ts";
 import type { ToolContext } from "./tools/types.ts";
 
@@ -42,9 +42,10 @@ export interface LoopOptions {
   /** Runaway guard — max tool-calling round-trips. */
   maxTurns?: number;
   onEvent?: (ev: StreamEvent) => void;
-  /** A tool is about to be dispatched (before its result) — lets a surface show it as in-flight. */
-  onToolStart?: (name: string) => void;
-  onToolResult?: (name: string, result: string) => void;
+  /** A tool is about to be dispatched (before its result) — lets a surface show it as in-flight. `id` is
+   *  the tool-call id (matches `onToolResult`), needed because read-only calls run concurrently. */
+  onToolStart?: (name: string, id: string) => void;
+  onToolResult?: (name: string, result: string, id: string) => void;
   /** A transient failure is being retried (fallback or backoff). `delayMs:0` = ladder switch. */
   onRetry?: (info: { attempt: number; delayMs: number; model: string; error: unknown }) => void;
   /** The turn failed for good (non-transient, context overflow, or retry budget exhausted). */
@@ -133,12 +134,20 @@ export async function loop(opts: LoopOptions): Promise<void> {
     const calls = assistant.toolCalls;
     if (!calls || calls.length === 0) return; // the model answered without calling a tool — done
 
-    for (const call of calls) {
-      opts.onToolStart?.(call.name);
+    // Read-only calls are idempotent → run them **concurrently**; mutating ones (write/edit/bash) run
+    // **sequentially** to avoid filesystem races + stale hashline anchors (D3). All calls in one turn are
+    // independent (the model issued them without seeing any result). Results are added to the session in
+    // the model's original call order, so replay/compaction stay deterministic.
+    const results = new Map<string, string>();
+    const run = async (call: ToolCall): Promise<void> => {
+      opts.onToolStart?.(call.name, call.id);
       const result = await dispatch(call.name, parseArgs(call.args), opts.mode, opts.ctx);
-      opts.session.addToolResult(call.id, result);
-      opts.onToolResult?.(call.name, result);
-    }
+      results.set(call.id, result);
+      opts.onToolResult?.(call.name, result, call.id);
+    };
+    await Promise.all(calls.filter((c) => isReadOnlyTool(c.name)).map(run)); // parallel read-only phase
+    for (const call of calls.filter((c) => !isReadOnlyTool(c.name))) await run(call); // serial mutating phase
+    for (const call of calls) opts.session.addToolResult(call.id, results.get(call.id) ?? "");
   }
 }
 

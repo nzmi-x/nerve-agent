@@ -227,7 +227,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let sidebarOn = true;
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
   const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
-  const toolCalls: { name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
+  const toolCalls: { id: string; name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
   const mkPanel = (id: string, title: string, grow = false): BoxRenderable =>
     new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: BORDER, title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
   const mkRows = (panel: BoxRenderable, n: number, prefix: string, h: number): TextRenderable[] => {
@@ -866,13 +866,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
             setStatus();
           }
         },
-        onToolStart: (name) => {
-          toolCalls.push({ name, status: "running" }); // sidebar tools panel: in-flight ●
+        onToolStart: (name, id) => {
+          toolCalls.push({ id, name, status: "running" }); // sidebar tools panel: in-flight ●
           renderSidebar();
         },
-        onToolResult: (name, result) => {
-          const tc = [...toolCalls].reverse().find((c) => c.status === "running");
-          if (tc) tc.status = result.startsWith("Error") ? "err" : "ok"; // ✓ / ✗
+        onToolResult: (name, result, id) => {
+          const tc = toolCalls.find((c) => c.id === id); // match by id — read-only calls finish out of order
+          if (tc) tc.status = /^(Error|Refused)/.test(result) ? "err" : "ok"; // ✓ / ✗
           renderSidebar();
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
           addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);

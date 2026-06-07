@@ -78,6 +78,13 @@ export function planBashAllowed(command: string): Decision {
     : { ok: false, reason: `'${prog}' isn't an obviously-safe read-only command — build a tool, or switch to EDIT` };
 }
 
+/** Does this tool run read-only (idempotent, no FS mutation)? Drives parallel tool dispatch in the loop —
+ *  read-only calls run concurrently, mutating ones (write/edit/bash) serially. bash is read-only:false, so
+ *  it always serializes (conservative + correct, even for a PLAN-safe read command). */
+export function isReadOnlyTool(name: string): boolean {
+  return !!toolByName(name)?.readonly;
+}
+
 /** The policy: may this tool call run in this mode? Pure — the unit-tested heart of the gate. */
 export function allowed(tool: Tool, args: Record<string, unknown>, mode: Mode): Decision {
   if (mode === "edit") return { ok: true };

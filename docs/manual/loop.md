@@ -10,9 +10,11 @@ dispatch until the model stops calling tools.
   it with a fresh session + a cheaper profile" ([D6](../DECISIONS.md)). No turn state in module globals.
 - Per turn: build a neutral `ProviderRequest` from `session.messages` → `provider.stream(req, signal)`
   → `pipe(source, interceptors, ac)` → `session.apply(ev)` (+ `onEvent`) → `commitAssistant()`.
-- If the committed assistant turn has tool calls: `dispatch(name, args, mode, ctx)` each (mode-gated),
-  `session.addToolResult(...)` (+ `onToolStart` before each dispatch / `onToolResult` after), and loop
-  again. No tool calls → done.
+- If the committed assistant turn has tool calls: read-only ones `dispatch` **concurrently** (`Promise.all`),
+  mutating ones (`write`/`edit`/`bash`) **sequentially** ([D32](../DECISIONS.md), split by `isReadOnlyTool`);
+  results are `session.addToolResult`'d in the model's **original call order**. `onToolStart` fires before
+  each dispatch and `onToolResult` after, both carrying the call **id** (read-only calls finish out of
+  order). No tool calls → done.
 - **One `AbortController` per turn** carries both ESC (`opts.signal`) and a `stopGuard`'s `ctl.abort()`;
   it's the signal the provider fetch and the pipeline watch. An aborted turn commits its partial
   message and stops (no dispatch).

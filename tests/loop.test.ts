@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { loop } from "../src/loop.ts";
 import { stopGuard } from "../src/interceptors.ts";
 import { Session } from "../src/session.ts";
+import { tools as registryTools } from "../src/tools/registry.ts";
+import type { Tool } from "../src/tools/types.ts";
 import type { Provider, StreamEvent } from "../src/providers/types.ts";
 
 /** A provider that replays one scripted StreamEvent[] per turn. */
@@ -207,4 +209,53 @@ test("loop: maxTurns caps a runaway tool-calling model", async () => {
   expect(session.messages.filter((m) => m.role === "assistant")).toHaveLength(3);
   expect(session.messages.filter((m) => m.role === "tool")).toHaveLength(3);
   await session.close();
+});
+
+test("loop: read-only tool calls run concurrently; mutating ones serialize; results stay in call order", async () => {
+  const order: string[] = [];
+  const mk = (name: string, readonly: boolean): Tool => ({
+    name,
+    description: "",
+    parameters: { type: "object", properties: {} },
+    readonly,
+    async run() {
+      order.push(`${name}+`);
+      await new Promise((r) => setTimeout(r, 40));
+      order.push(`${name}-`);
+      return name;
+    },
+  });
+  registryTools.push(mk("ro_a", true), mk("ro_b", true), mk("mu_a", false), mk("mu_b", false));
+  try {
+    const session = new Session({ id: "PAR" });
+    session.addUser("go");
+    await loop({
+      provider: fakeProvider([
+        [
+          { type: "tool_call", index: 0, id: "r1", name: "ro_a", args: "{}" },
+          { type: "tool_call", index: 1, id: "r2", name: "ro_b", args: "{}" },
+          { type: "tool_call", index: 2, id: "m1", name: "mu_a", args: "{}" },
+          { type: "tool_call", index: 3, id: "m2", name: "mu_b", args: "{}" },
+          { type: "done", reason: "tool_calls" },
+        ],
+        [{ type: "text", delta: "ok" }, { type: "done", reason: "stop" }],
+      ]),
+      session,
+      model: "x",
+      mode: "edit", // so the mutating fakes aren't refused by the PLAN gate
+      ctx: { cwd: dir },
+      interceptors: [],
+      signal: new AbortController().signal,
+    });
+
+    // both read-only tools STARTED before either finished → they ran concurrently.
+    expect(order.slice(0, 2).sort()).toEqual(["ro_a+", "ro_b+"]);
+    // the mutating tools ran strictly one-after-another, each finishing before the next began.
+    expect(order.filter((o) => o.startsWith("mu_"))).toEqual(["mu_a+", "mu_a-", "mu_b+", "mu_b-"]);
+    // tool results were added to the session in the model's original call order.
+    expect(session.messages.filter((m) => m.role === "tool").map((m) => m.content)).toEqual(["ro_a", "ro_b", "mu_a", "mu_b"]);
+    await session.close();
+  } finally {
+    registryTools.splice(registryTools.length - 4, 4); // remove the fakes
+  }
 });

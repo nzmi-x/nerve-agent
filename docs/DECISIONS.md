@@ -760,6 +760,28 @@ substrate; the cat-able log is the only thing given up — an `/export` can rest
 **Phase.** Built (Phase 1.5), live-verified: fresh `~/.nerve` → headless run created
 `projects/<slug>/nerve.db` with the session row + both messages; full suite (155) green against SQLite.
 
+## D32 — Parallel tool dispatch: read-only calls concurrently, mutating ones serially
+**Decision.** When a single assistant turn returns multiple tool calls, the loop runs the **read-only**
+ones **concurrently** (`Promise.all`) and the **mutating** ones (`write`/`edit`/`bash` — anything
+`readonly:false`) **sequentially**. All calls in a turn are independent (the model issued them without
+seeing any result), so this is safe; results are written back to the session in the model's **original
+call order** so replay/compaction ([D17](#d17--context-compaction-summarize-old-turns-on-demand-d17)) stay deterministic. The split is by the existing `Tool.readonly`
+flag via `isReadOnlyTool` (dispatch.ts); `onToolStart`/`onToolResult` carry the call **id** so a surface
+can match out-of-order completions (the sidebar tools/subagents panels do). Because the `task` tool is
+`readonly:true`, **multiple subagents in one turn run in parallel** for free — and each subagent's own
+read-only tools parallelize too (same loop). Concurrency is safe end-to-end: read/grep/glob/fetch are
+FS/network-idempotent, and the LSP client matches responses by id (`pending` map), so a shared `ctx.lsp`
+handles concurrent queries.
+**Why.** Context-gathering — read N files, grep M patterns, fan out research subagents — is the slow,
+embarrassingly-parallel part of an agent turn; serializing it wasted wall-clock. Edits are few and want
+ordering anyway.
+**Rejected.** Parallelizing **everything** (two `edit`/`write` to one file race + stale hashline anchors
+[D3](#d3--edit-mechanism-hashline-only-content-anchored); concurrent `bash` tramples cwd/files — `bash` is `readonly:false` so it always serializes, conservative
+but correct even for a PLAN-safe read command); OS threads (needless — async concurrency suffices for I/O).
+**Phase.** Built (Phase 1.5), live-verified: a turn with two `task` calls ran both subagents concurrently
+(`pickTheme`→`theme.ts:81`, `runSubagent`→`subagent.ts:33`); unit test asserts read-only interleave +
+mutating serialize + call-order results (`tests/loop.test.ts`).
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
