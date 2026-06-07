@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadModels, selectModel, providerFor } from "../src/config.ts";
+import { loadModels, selectModel, selectSubagentModel, providerFor } from "../src/config.ts";
 
 test("loadModels: bundled catalog (no global override); default is deepseek-v4-flash", () => {
   const saved = Bun.env.NERVE_HOME;
@@ -25,6 +25,19 @@ test("selectModel: by id, default fallback, and unknown throws", () => {
   expect(selectModel(models, "a").id).toBe("a"); // by id
   expect(() => selectModel(models, "z")).toThrow(/unknown model/);
   expect(selectModel([{ id: "only", provider: "deepseek" as const }]).id).toBe("only"); // first fallback
+});
+
+test("selectSubagentModel: the subagent-flagged model, else the default (D6)", () => {
+  const flagged = [
+    { id: "pro", provider: "deepseek" as const, default: true },
+    { id: "flash", provider: "deepseek" as const, subagent: true },
+  ];
+  expect(selectSubagentModel(flagged).id).toBe("flash");
+  const none = [
+    { id: "a", provider: "deepseek" as const },
+    { id: "b", provider: "gemini" as const, default: true },
+  ];
+  expect(selectSubagentModel(none).id).toBe("b"); // falls back to the default
 });
 
 test("providerFor: each provider needs its key, then resolves", () => {

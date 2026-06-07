@@ -6,6 +6,7 @@
       "provider": "deepseek",
       "label": "Flash — simple edits, context-gathering, subagents",
       "default": true,
+      "subagent": true,
       "contextWindow": 1000000,
       "pricing": { "input": 0.14, "cachedInput": 0.0028, "output": 0.28 }
     },

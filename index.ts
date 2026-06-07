@@ -93,7 +93,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     session,
     model: entryId,
     mode,
-    ctx: { cwd: process.cwd(), ask: headlessAsk, lsp, touched: langTouched, edited },
+    ctx: { cwd: process.cwd(), ask: headlessAsk, lsp, touched: langTouched, edited, signal: ac.signal },
     interceptors: [secretRedaction(), reasoningRouter((d) => out(DIM + d + RESET)), tokenTap(session)],
     signal: ac.signal,
     system: sys,

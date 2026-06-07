@@ -1,6 +1,6 @@
 # tools
 
-**Status:** built (Phase 1.5) — read, write, edit, bash, ls, grep, glob, manual, ask_user, **lsp** ([D10](../DECISIONS.md), see [lsp](lsp.md)), **notebook** ([D23](../DECISIONS.md), see [marimo](marimo.md))
+**Status:** built (Phase 1.5) — read, write, edit, bash, ls, grep, glob, manual, ask_user, **lsp** ([D10](../DECISIONS.md), see [lsp](lsp.md)), **notebook** ([D23](../DECISIONS.md), see [marimo](marimo.md)), todo, fetch, **task** ([D6](../DECISIONS.md) subagent)
 **What:** the local tool set the model calls. Each is a plain object run as a direct Bun call —
 no daemon, no RPC. The registry exposes them to the providers and to the dispatcher.
 **Code:** `src/tools/types.ts` (the `Tool` contract) · `src/tools/registry.ts` · `src/tools/*.ts`
@@ -41,6 +41,11 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `fetch` ([D28](../DECISIONS.md)) — Bun-native HTTP GET of a URL → **HTML to Markdown**, JSON
   pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Caps timeout/
   size; skips binary. Export is `fetchTool` (avoids shadowing global `fetch`).
+- `task` ([D6](../DECISIONS.md)) — **delegate to a subagent**: runs the loop on a fresh **ephemeral**
+  session (`src/subagent.ts`), **read-only** (PLAN mode), with the registry's `readonly` tools **minus
+  `task`/`askUser`/`todo`** (no recursion, no human), on the `subagent`-flagged cheap model, returning
+  only the final summary (cap 8 k). `readonly` → PLAN-safe (it spawns a read-only agent). Abortable via
+  `ctx.signal`. For context-heavy isolable lookups; do small/edit work inline instead.
 
 **Hot-swap ([D7](../DECISIONS.md)):** the active set is a **mutable** `let tools` in `registry.ts`;
 `reloadTools()` re-imports every entry in `TOOL_MODULES` **cache-busted** (`import("./x.ts?t=…")`) and

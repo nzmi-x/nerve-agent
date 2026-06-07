@@ -89,3 +89,13 @@ test("lazy session (D27): no row until the first write", async () => {
   await s.close();
   expect(sessionExists(process.cwd(), "lazy")).toBe(true);
 });
+
+test("ephemeral session (D6): accumulates messages in memory but persists nothing", async () => {
+  const s = new Session({ id: "eph", ephemeral: true });
+  s.addUser("hi");
+  s.apply({ type: "text", delta: "yo" });
+  s.commitAssistant();
+  s.setTitle("ignored");
+  expect(s.messages.map((m) => m.content)).toEqual(["hi", "yo"]); // in-memory accumulation works
+  expect(sessionExists(process.cwd(), "eph")).toBe(false); // …but nothing was written to the DB
+});

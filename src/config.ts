@@ -14,6 +14,8 @@ export interface ModelEntry {
   provider: "deepseek" | "gemini";
   label?: string;
   default?: boolean;
+  /** Mark the model subagents run on (D6) — the cheap profile. Falls back to `default` if none set. */
+  subagent?: boolean;
   temperature?: number;
   thinking?: boolean;
   /** Max context window in tokens — drives the context-used indicator. */
@@ -41,6 +43,11 @@ export function selectModel(models: ModelEntry[], id?: string): ModelEntry {
     return found;
   }
   return models.find((m) => m.default) ?? models[0]!;
+}
+
+/** The model subagents run on (D6): the `subagent`-flagged entry, else the active default. */
+export function selectSubagentModel(models: ModelEntry[]): ModelEntry {
+  return models.find((m) => m.subagent) ?? selectModel(models);
 }
 
 const PROVIDERS: Record<ModelEntry["provider"], Provider | null> = {

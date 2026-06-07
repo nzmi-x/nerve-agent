@@ -35,6 +35,8 @@ export interface ToolContext {
   edited?: Set<string>;
   /** Display the agent's task list (the `todo` tool, D25) — the TUI renders a panel, headless prints. */
   setTodos?: (todos: Todo[]) => void;
+  /** The turn's abort signal (ESC) — so a long-running tool (e.g. `task`'s subagent, D6) cancels too. */
+  signal?: AbortSignal;
 }
 
 export interface Tool {

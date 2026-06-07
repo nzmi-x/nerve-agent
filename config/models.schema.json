@@ -41,6 +41,10 @@
           "type": "boolean",
           "description": "Mark exactly one model as the startup default. If none is marked, the first entry is used."
         },
+        "subagent": {
+          "type": "boolean",
+          "description": "Mark the (cheap) model that subagents run on (the `task` tool, D6). If none is marked, the default is used."
+        },
         "temperature": {
           "type": "number",
           "minimum": 0,

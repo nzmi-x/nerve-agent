@@ -88,13 +88,26 @@ subagents) → `deepseek-v4-pro` (slightly complex) → `gemini-3.5-flash` → `
 runtime profile-cycling UI (the user rarely switches — picks per known task); mode-coupled model
 mapping (couples two orthogonal concerns); hardcoding/listing every Gemini & DeepSeek model.
 
-## D6 — Subagents: deferred, but the loop must be re-entrant
-**Decision.** Subagents are **deferred** past Phase 1. The hard constraint: **`loop.ts` is a pure,
-re-entrant function over a session**, so a subagent later is simply "run the loop with a fresh
-isolated session + a cheaper model profile, return only the final summary."
-**Why.** Keeps Phase 1 single-agent and lean; the re-entrancy constraint makes delegation nearly
-free to add later (cheap model = `deepseek-v4-flash`).
-**Rejected.** Building a `task` tool now; predefined named-role subagents (more structure up front).
+## D6 — Subagents: a read-only `task` tool over the re-entrant loop
+**Decision.** **Built** (Phase 1.5). Because `loop.ts` is a pure, re-entrant function over a session, a
+subagent is just "run the loop with a fresh **ephemeral** session + a cheaper profile, return only the
+final summary" — `src/subagent.ts` (`runSubagent`) + the `task` tool (`src/tools/task.ts`). Guardrails baked
+in: the subagent runs in **PLAN mode** (read-only, enforced at dispatch — no edits/shell), on an **ephemeral
+session** ([D31](#d31--persistence-on-bunsqlite-sessions-in-a-per-project-db-not-jsonl-skillsconfig-stay-files): accumulates in memory, **writes no DB rows**, never shows in `/sessions`), with a curated
+toolset = the registry's **`readonly` tools minus `task`/`askUser`/`todo`** (so **no recursion**, no human
+prompts), bounded by `maxTurns` (12), abortable via `ctx.signal` (ESC). The model is config-driven — the
+**`subagent`-flagged** catalog entry (`deepseek-v4-flash`), falling back to the default (no hardcoded id).
+`task` is itself `readonly:true` (it only spawns a read-only subagent → PLAN-safe). Returns the subagent's
+final assistant message (capped 8 k).
+**Why.** Offload context-heavy, isolable lookups (search across many files, trace callers, digest docs)
+to a clean cheap context so the main thread stays lean — the standard delegation win, made nearly free by
+the re-entrancy constraint we held to in Phase 1. Read-only by default sidesteps subagent/main edit races
+and recursion fork-bombs; editing subagents can come later if a real need appears.
+**Rejected.** Predefined named-role subagents (more structure up front than warranted); editing/EDIT-mode
+subagents (race + recursion risk for v1 — read-only research is the 80% case); persisting subagent sessions
+(ephemeral keeps `/sessions` clean); a hardcoded subagent model id (a catalog flag instead).
+**Phase.** Built (Phase 1.5), live-verified: headless run → main agent called `task` → subagent grepped/read
+and reported `pickTheme` at `src/tui/theme.ts:81` + its return type. Tests: `tests/subagent.test.ts` (fake provider).
 
 ## D7 — Self-hacking: runtime hot-swap of seams
 **Decision.** The **tool registry** and the **interceptor pipeline** are hot-reloadable at runtime.

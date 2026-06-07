@@ -13,6 +13,8 @@ export interface SessionInit {
   cwd?: string;
   /** Reload prior messages from the DB (for `--resume`). */
   resume?: boolean;
+  /** In-memory only — never persisted (subagent sessions, D6). Accumulates `messages` but writes no rows. */
+  ephemeral?: boolean;
 }
 
 interface ToolCallBuf {
@@ -35,6 +37,7 @@ export class Session {
   readonly messages: Message[] = [];
   title = ""; // a short agent-generated label, set once near the start of the session (D26)
   private readonly db: Database;
+  private readonly ephemeral: boolean; // D6: subagent sessions accumulate in memory but persist nothing
   private started = false; // whether the `sessions` row exists — created lazily on the first write (D27)
 
   // Count of canonical messages ever written — the global ordinal compaction anchors against (D17).
@@ -48,6 +51,7 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.id = init.id ?? new Date().toISOString().replace(/[:.]/g, "-");
+    this.ephemeral = init.ephemeral ?? false;
     this.db = openDb(init.cwd);
     if (init.resume) {
       const loaded = load(this.db, this.id);
@@ -69,11 +73,12 @@ export class Session {
 
   /** Persist one canonical message as a row at the current global ordinal, then bump it. */
   private insert(msg: Message): void {
+    const seq = this.totalMsgs++;
+    if (this.ephemeral) return; // in-memory only — `messages` already holds it
     this.ensureStarted();
     this.db
       .query("INSERT INTO messages(session_id, seq, role, content, reasoning, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(this.id, this.totalMsgs, msg.role, msg.content, msg.reasoning ?? null, msg.toolCalls ? JSON.stringify(msg.toolCalls) : null, msg.toolCallId ?? null);
-    this.totalMsgs++;
+      .run(this.id, seq, msg.role, msg.content, msg.reasoning ?? null, msg.toolCalls ? JSON.stringify(msg.toolCalls) : null, msg.toolCallId ?? null);
     this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(Date.now(), this.id);
   }
 
@@ -153,6 +158,7 @@ export class Session {
     const kept = this.messages.slice(this.messages.length - keepCount);
     this.messages.length = 0;
     this.messages.push(summaryMessage(summary), ...kept);
+    if (this.ephemeral) return;
     this.ensureStarted();
     this.db.query("INSERT INTO compactions(session_id, at, summary, first_kept) VALUES (?, ?, ?, ?)").run(this.id, Date.now(), summary, firstKept);
     this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(Date.now(), this.id);
@@ -161,6 +167,7 @@ export class Session {
   /** Set the session's short title (D26) — a column on the `sessions` row; latest wins on resume. */
   setTitle(title: string): void {
     this.title = title;
+    if (this.ephemeral) return;
     this.ensureStarted();
     this.db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), this.id);
   }

@@ -7,6 +7,8 @@
 **How it works:**
 - `loadModels(path?)` reads the committed `config/models.json` (resolved against the install dir).
 - `selectModel(models, id?)` picks by id, else the `default` entry, else the first.
+- `selectSubagentModel(models)` picks the `subagent`-flagged entry (the cheap model the `task` subagent
+  runs on, [D6](../DECISIONS.md)), else the default. Flag it in `models.json` (`"subagent": true`).
 - `providerFor(entry)` returns the `Provider` and checks its key in `Bun.env`; both `deepseek` and
   `gemini` are wired now. `fallbacksFor(models, active)` builds the [D15](../DECISIONS.md) ladder from
   catalog entries after `active` that are usable (implemented provider + key present).

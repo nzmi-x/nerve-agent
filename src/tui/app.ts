@@ -764,7 +764,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
