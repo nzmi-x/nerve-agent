@@ -978,7 +978,37 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       applySidebar(); // the panel appearing/disappearing is the indicator — no transcript log
       return;
     }
-    if (key.name === "return" && (key.meta || key.option)) return void input.insertText("\n"); // Alt+Enter → newline
+    // Enter-family: we OWN it (preventDefault), so the Textarea doesn't *also* newline/submit (double-act).
+    // Enter sends (or accepts a popup / resolves the picker); Alt+Enter inserts a newline.
+    if (key.name === "return" || key.name === "kpenter") {
+      key.preventDefault();
+      key.stopPropagation();
+      if (key.meta || key.option) return void input.insertText("\n"); // Alt+Enter → newline
+      if (asking) {
+        const a = asking;
+        asking = null;
+        setPopup([]);
+        a.resolve(a.req.options[a.sel]!.label);
+        return;
+      }
+      if (suggestOpen()) {
+        const it = suggest.items[suggest.sel];
+        if (it && suggest.kind === "slash") return void submit(`/${it.insert}`); // `/ex`↵ → run /exit
+        if (it && suggest.kind === "at") {
+          const next = applyAtSuggestion(input.plainText, it.insert);
+          if (it.insert.endsWith("/")) {
+            // a directory drills in — complete + keep the popup open, don't send
+            echoGuard = next;
+            input.setText(next);
+            void updateSuggestions(next);
+            return;
+          }
+          return void submit(next); // a file completes and sends
+        }
+        return; // popup open but nothing highlighted → swallow Enter
+      }
+      return void submit(input.plainText); // Enter sends the message
+    }
 
     if (asking) {
       if (key.name === "up") {
@@ -987,11 +1017,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       } else if (key.name === "down") {
         asking.sel = Math.min(asking.req.options.length - 1, asking.sel + 1);
         renderAsk();
-      } else if (key.name === "return") {
-        const a = asking;
-        asking = null;
-        setPopup([]);
-        a.resolve(a.req.options[a.sel]!.label);
       }
       return;
     }
@@ -1016,24 +1041,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         clearSuggest();
         return;
       }
-      if (key.name === "return") {
-        const it = suggest.items[suggest.sel];
-        if (it && suggest.kind === "slash") return void submit(`/${it.insert}`); // `/ex`↵ → run /exit
-        if (it && suggest.kind === "at") {
-          const next = applyAtSuggestion(input.plainText, it.insert);
-          if (it.insert.endsWith("/")) {
-            // a directory drills in — complete + keep the popup open, don't send
-            echoGuard = next;
-            input.setText(next);
-            void updateSuggestions(next);
-            return;
-          }
-          return void submit(next); // a file completes and sends
-        }
-        return; // popup open but nothing highlighted → swallow Enter
-      }
+      // (Enter over a popup is handled in the Enter-family block above.)
     }
-    if (key.name === "return") return void submit(input.plainText); // Enter sends the message
     if (key.name === "tab") return void toggleMode(); // plain Tab with no popup also toggles the mode
     if (key.name === "escape") turnAbort?.abort();
   });
