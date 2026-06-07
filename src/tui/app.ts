@@ -35,28 +35,15 @@ import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId } from "../sessions.ts";
 import { sessionsDir } from "../paths.ts";
+import { pickTheme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest, Todo } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
-// Tokyo Night palette
-const FG = "#c0caf5";
-const MUTE = "#737aa2";
-const DIM = "#565f89";
-const BORDER = "#2f334d";
-const ACCENT = "#7aa2f7";
-const GREEN = "#9ece6a";
-const YELLOW = "#e0af68";
-const RED = "#f7768e";
-const MAGENTA = "#bb9af7";
-const CYAN = "#7dcfff";
-const ORANGE = "#ff9e64";
-const SELBG = "#283457";
-const PANEL = "#16161e";
-const DARKFG = "#1a1b26";
-const WHITE = "#ffffff";
+// Palette — inherited from ghostty's Adwaita / Adwaita Dark, picked by the GNOME light/dark scheme (D30).
+const { FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme();
 
 const syntaxStyle = SyntaxStyle.fromStyles({
   default: { fg: RGBA.fromHex(FG) },
@@ -255,7 +242,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
     sessionRows[0]!.content = t`${bold(fg(CYAN)(trunc(session.title || "untitled", W)))}`;
-    sessionRows[1]!.content = "";
+    sessionRows[1]!.content = busy ? t`${fg(YELLOW)("● streaming")}` : ""; // status bar is hidden while the sidebar shows
     sessionRows[2]!.content = t`${fg(MUTE)("model ")}${fg(FG)(trunc(active.id, W - 6))}`;
     sessionRows[3]!.content = mode === "edit" ? t`${fg(MUTE)("mode  ")}${bg(GREEN)(fg(DARKFG)(" EDIT "))}` : t`${fg(MUTE)("mode  ")}${bg(YELLOW)(fg(DARKFG)(" PLAN "))}`;
     sessionRows[4]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
@@ -283,7 +270,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   function applySidebar(): void {
     const visible = sidebarOn && renderer.width >= SIDEBAR_MIN;
     sidebar.width = visible ? SIDEBAR_W : 0;
-    if (visible) renderSidebar();
+    status.height = visible ? 0 : 1; // the session panel shows the same stats — only one of them at a time
+    setStatus(); // refresh the bar's content + the sidebar (each no-ops when hidden)
   }
   // Re-evaluate the breakpoint when the terminal resizes (guarded — older cores may not emit it).
   (renderer as { on?: (e: string, cb: () => void) => void }).on?.("resize", () => applySidebar());
@@ -839,8 +827,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
   addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help · Ctrl+B sidebar")}`);
-  applySidebar(); // size the sidebar to the current terminal width (and render it if it fits)
-  setStatus();
+  applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   void refreshBalance();
 }
 

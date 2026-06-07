@@ -7,8 +7,12 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 **Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)).
 
 **How it works:**
-- **Responsive row layout** ([D29](../DECISIONS.md), Tokyo-Night palette): the root is a flex **row** —
-  a **`mainCol`** (`flexGrow:1`, `minWidth:0`) holding the stack below, plus a fixed **34-col sidebar**.
+- **Responsive row layout** ([D29](../DECISIONS.md)): the root is a flex **row** — a **`mainCol`**
+  (`flexGrow:1`, `minWidth:0`) holding the stack below, plus a fixed **34-col sidebar**.
+- **Theme** ([D30](../DECISIONS.md)): the palette comes from `src/tui/theme.ts` (`pickTheme()`), inheriting
+  ghostty's Adwaita / Adwaita Dark by reading the GNOME `color-scheme` (`gsettings`) at startup —
+  `$NERVE_THEME=light|dark` forces it. `app.ts` destructures the roles, so every `FG`/`MUTE`/… (incl. the
+  markdown `SyntaxStyle`) is theme-driven with no other change.
 - Main column: a **bordered transcript** `Box` (rounded, title " ◆ &lt;title&gt; ") wrapping a `ScrollBox`
   (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
   in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a `popup` `Box` (autosuggest
@@ -25,9 +29,11 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   palette) whose `.content` grows per delta, `streaming=false` on finish. User lines use the `t`/`fg`/
   `bold` template (green `❯`); reasoning dim/italic (`✻`); tool results dim (`⎿`); shell `$`. Lines are
   appended (`transcript.add`) and removed by id (`transcript.remove(id)`) for `/clear` & `/drop`.
-- **Status bar:** `model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a `bg` mode badge.
-- **Status line:** `model · mode · cost · context% · balance`, fed by `UsageMeter` (on `usage` events)
-  + `fetchBalance` (startup / `/model` / `/balance`). See [usage](usage.md), [balance](balance.md).
+- **Status bar:** `model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a `bg` mode badge,
+  fed by `UsageMeter` (on `usage` events) + `fetchBalance` (startup / `/model` / `/balance`). **Shown only
+  when the sidebar is hidden** (the session panel carries the same fields, D29) — when the sidebar is up the
+  bar collapses (`height 0`) and the streaming `●` shows in the session panel instead.
+  See [usage](usage.md), [balance](balance.md).
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).

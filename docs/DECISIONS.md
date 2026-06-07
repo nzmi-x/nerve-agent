@@ -663,7 +663,10 @@ on a guarded `renderer.on("resize")`. Both panels use the proven **fixed-pool-of
 pattern (like the todo panel, [D25](#d25--a-todo-tool-with-a-pinned-colored-tui-panel)); the files pool is
 capped to the terminal height so it never overflows. `renderSidebar()` is a **no-op while hidden**, and the
 files panel is fed by the same `langTouched`/`sessionEdited` sets the language packs already track —
-**zero new bookkeeping in the engine**. State resets with the session (`/drop`, `/resume`).
+**zero new bookkeeping in the engine**. State resets with the session (`/drop`, `/resume`). The bottom
+**status bar shows only when the sidebar is hidden** (`status.height = visible ? 0 : 1`) — the session
+panel already carries model/mode/cost/ctx/balance, so we don't duplicate it; the streaming `●` moves into
+the session panel while the sidebar is up.
 **Why.** The user wanted a "web-app mindset" — surface what matters (live session economics + what's been
 touched) in flexible panels that adapt to full / half / quarter-screen widths, collapsible to a single
 column. OpenTUI's flexbox makes this a layout change, not an engine change: the row + `flexGrow`/`minWidth`
@@ -677,6 +680,28 @@ starts empty and refills as the agent works).
 OpenTUI props but there's no TTY in the build env, so the visual layout (panel sizing, breakpoint, toggle)
 must be eyeballed. Add a panel = another bordered box + a pooled-row render in the sidebar block of `app.ts`.
 
+## D30 — TUI theme inherited from ghostty (Adwaita / Adwaita Dark), GNOME light/dark aware
+**Decision.** The palette lives in `src/tui/theme.ts` (`pickTheme()`), not hardcoded in `app.ts`. We mirror
+the user's ghostty `theme = light:Adwaita,dark:Adwaita Dark` by detecting the **GNOME color-scheme** —
+`gsettings get org.gnome.desktop.interface color-scheme` (the *same* signal ghostty resolves that line
+against) — at **startup** and applying the matching Adwaita palette. Accent colours are ghostty's own
+`/usr/share/ghostty/themes/Adwaita[ Dark]` values; the chrome roles a 16-colour terminal palette doesn't
+define (border/panel/selection/dim) are **derived** for legibility on each ground (and, for light, accents
+darkened to the libadwaita ramp so coloured text + the inverted EDIT/PLAN badges stay readable on white).
+`app.ts` just destructures `pickTheme()` — every existing `FG`/`MUTE`/… reference (incl. the markdown
+`SyntaxStyle`) is unchanged. `$NERVE_THEME=light|dark` forces one; off-GNOME falls back to dark.
+**Why.** The user runs ghostty with system-following Adwaita and wanted nerve to match rather than clash
+with a fixed Tokyo-Night. Reading the *same* gsettings key ghostty uses keeps them in lockstep without nerve
+having to parse ghostty's config. Detection is sync (`Bun.spawnSync`) at module load, so the constants stay
+module-level — minimal diff.
+**Rejected.** **Live-following** the scheme mid-session (a relaunch re-detects — not worth a gsettings
+watcher in a TUI); **parsing ghostty's config/theme files at runtime** (path varies by distro/install — the
+values are stable, so we embed them and read gsettings only for the light/dark choice); using the
+terminal's own ANSI colours (nerve needs specific roles for syntax + chrome that ANSI 16 doesn't pin down);
+keeping Tokyo Night (clashed with the user's Adwaita ghostty).
+**Phase.** Built (Phase 1.5), auto-detect verified (this box is `prefer-dark` → Adwaita Dark `#1d1d20`;
+`NERVE_THEME=light` → `#ffffff`). Colour *legibility* still wants a real-terminal eyeball (esp. light mode).
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
@@ -684,6 +709,9 @@ must be eyeballed. Add a panel = another bordered box + a pooled-row render in t
   `Ctrl+C` exits the app.
 - **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch));
   plain `Tab` also toggles it **when no autosuggest popup is open** (popup-`Tab` accepts the suggestion).
+  **Startup default is PLAN** (read-only — safer first contact); `--mode edit` opts into EDIT from launch.
+- **Sidebar:** `Ctrl+B` toggles the session/files sidebar; it auto-hides below 100 cols. The bottom status
+  bar shows only while the sidebar is hidden (the session panel carries the same model/mode/cost/ctx/bal).
 - **Shell:** the model's `bash` tool and the `!`-shell escape run via the user's shell — `Bun.env.SHELL`
   (zsh on this setup), falling back to `zsh` — not hardcoded `bash`. Non-interactive (`-c`); no rc sourcing.
 - **Startup preflight:** `index.ts` checks required external deps on PATH (the shell + `git`) and exits
