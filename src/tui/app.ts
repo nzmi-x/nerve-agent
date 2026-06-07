@@ -77,6 +77,7 @@ const HELP = [
   "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
   "keys      Enter send · Alt+Enter newline · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · PgUp/PgDn scroll · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
+  "edit      readline (= zsh): Ctrl+A/E line start/end · Ctrl+W del word · Ctrl+K/U kill to end/start · Alt+B/F word back/fwd · Alt+D del word · ←/→ move (Ctrl+B is sidebar, not move-back)",
   "copy      selection, Ctrl+Shift+C/V, right-click are your terminal's now (nerve no longer grabs the mouse/keyboard)",
 ].join("\n");
 
@@ -974,6 +975,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (key.name === "pagedown") return void transcript.scrollBy(Math.max(3, transcriptBox.height - 4));
     if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
     if (key.ctrl && key.name === "b") {
+      key.preventDefault(); // else the Textarea also runs readline Ctrl+B (move-back-char)
+      key.stopPropagation();
       sidebarOn = !sidebarOn;
       applySidebar(); // the panel appearing/disappearing is the indicator — no transcript log
       return;
