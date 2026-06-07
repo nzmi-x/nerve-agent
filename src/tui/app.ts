@@ -436,6 +436,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const sysOk = (msg: string): void => void addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(msg)}`);
   const sysWarn = (msg: string): void => void addText(() => t`${fg(YELLOW)("⚠")} ${fg(MUTE)(msg)}`);
   const sysErr = (msg: string): void => void addText(() => t`${fg(RED)("✗")} ${fg(RED)(msg)}`);
+  const welcome = (): void => void addText(() => t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
   const clearTranscript = (): void => {
     for (const l of lines) transcript.remove(l.el.id);
     lines.length = 0;
@@ -734,7 +735,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
-    sysOk(`dropped ${old} · new session ${session.id}`);
+    welcome(); // fresh start — back to the welcome line, no session-id chatter
     setStatus();
   }
 
@@ -743,7 +744,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (busy) return;
     const id = idArg ?? lastSessionId(cwd, session.id);
     if (!id) return void sysInfo("no other session to resume");
-    if (!sessionExists(cwd, id)) return void sysErr(`no session '${id}'`);
+    if (!sessionExists(cwd, id)) return void sysErr("that session no longer exists");
     await session.close();
     session = new Session({ id, resume: true, cwd });
     meter = new UsageMeter();
@@ -754,7 +755,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
-    sysOk(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`);
+    sysOk(`resumed "${session.title || "untitled"}" · ${session.messages.length} message(s) in context`);
     setStatus();
   }
 
@@ -764,7 +765,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (!list.length) return void sysInfo("no sessions yet");
     openPicker({
       title: "sessions · ↑/↓ · Enter resume · d delete · Esc close",
-      items: list.map((s) => ({ label: s.title || s.preview || s.id, desc: `${s.msgs} msg · ${rel(s.mtimeMs)}`, current: s.id === session.id })),
+      items: list.map((s) => ({ label: s.title || s.preview || "(untitled)", desc: `${s.msgs} msg · ${rel(s.mtimeMs)}`, current: s.id === session.id })),
       onPick: (i) => {
         const s = list[i]!;
         if (s.id === session.id) return void sysInfo("already on this session");
