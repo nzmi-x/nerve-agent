@@ -38,3 +38,20 @@ test("parseResults: respects the max cap and tolerates missing snippets", () => 
     { title: "X", url: "https://x.test/", snippet: "" },
   ]);
 });
+
+test("parseResults: a dropped result-link (empty title) doesn't desync later snippets onto the wrong result", () => {
+  // A title-less result-link is skipped, but its snippet cell remains — a positional zip would shift every
+  // later snippet by one. Pairing by document position keeps each snippet with its own link.
+  const html = `
+    <a class='result-link' href="https://one.test/">Result One</a>
+    <td class='result-snippet'>snippet one</td>
+    <a class='result-link' href="https://icon.test/"></a>
+    <td class='result-snippet'>ORPHAN snippet</td>
+    <a class='result-link' href="https://two.test/">Result Two</a>
+    <td class='result-snippet'>snippet two</td>`;
+  const r = parseResults(html, 8);
+  expect(r.map((x) => `${x.url}|${x.snippet}`)).toEqual([
+    "https://one.test/|snippet one",
+    "https://two.test/|snippet two", // NOT "ORPHAN snippet"
+  ]);
+});

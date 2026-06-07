@@ -32,19 +32,24 @@ function realUrl(href: string): string {
 
 /** Pure parser for a lite.duckduckgo.com results page → ranked results. Exported for tests (offline). */
 export function parseResults(html: string, max: number): SearchResult[] {
-  const links: { title: string; url: string }[] = [];
+  // Record each result's document position so snippets pair with their OWN link (the snippet that follows
+  // a link, before the next link) — a positional zip would desync every later result if one link is dropped.
+  const links: { title: string; url: string; pos: number }[] = [];
   const anchorRe = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = anchorRe.exec(html))) {
     if (!/result-link/.test(m[1]!)) continue; // only the result anchors, not nav/pagination
     const href = /\bhref=['"]([^'"]+)['"]/.exec(m[1]!)?.[1];
     const title = inlineText(m[2]!);
-    if (href && title) links.push({ title, url: realUrl(href) });
+    if (href && title) links.push({ title, url: realUrl(href), pos: m.index });
   }
-  const snippets: string[] = [];
+  const snippets: { text: string; pos: number }[] = [];
   const snipRe = /<td\b[^>]*\bclass=['"][^'"]*result-snippet[^'"]*['"][^>]*>([\s\S]*?)<\/td>/gi;
-  while ((m = snipRe.exec(html))) snippets.push(inlineText(m[1]!));
-  return links.slice(0, max).map((l, i) => ({ ...l, snippet: snippets[i] ?? "" }));
+  while ((m = snipRe.exec(html))) snippets.push({ text: inlineText(m[1]!), pos: m.index });
+  return links.slice(0, max).map((l, i) => {
+    const end = links[i + 1]?.pos ?? Infinity;
+    return { title: l.title, url: l.url, snippet: snippets.find((s) => s.pos > l.pos && s.pos < end)?.text ?? "" };
+  });
 }
 
 export const search: Tool = {
@@ -65,7 +70,9 @@ export const search: Tool = {
   async run(args) {
     if (typeof args.query !== "string" || !args.query.trim()) return "Error: 'query' must be a non-empty string";
     const query = args.query.trim();
-    const max = Math.min(Math.max(1, Math.trunc(Number(args.max)) || DEFAULT_MAX), HARD_MAX);
+    // A positive request clamps to [1, HARD_MAX]; anything invalid (missing / NaN / 0 / negative) → default.
+    const requested = Math.trunc(Number(args.max));
+    const max = requested > 0 ? Math.min(requested, HARD_MAX) : DEFAULT_MAX;
     const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
 
     let res: Response;
