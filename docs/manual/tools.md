@@ -38,6 +38,9 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `todo` ([D25](../DECISIONS.md)) — the agent's task list for multi-step work (pass the full list each
   call). `readonly` → PLAN-safe (only UI state). Shown via `ctx.setTodos`: a **pinned colored panel**
   in the TUI, a printed checklist headless.
+- `fetch` ([D28](../DECISIONS.md)) — Bun-native HTTP GET of a URL → **HTML to Markdown**, JSON
+  pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Caps timeout/
+  size; skips binary. Export is `fetchTool` (avoids shadowing global `fetch`).
 
 **Hot-swap ([D7](../DECISIONS.md)):** the active set is a **mutable** `let tools` in `registry.ts`;
 `reloadTools()` re-imports every entry in `TOOL_MODULES` **cache-busted** (`import("./x.ts?t=…")`) and

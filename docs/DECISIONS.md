@@ -629,6 +629,20 @@ is a no-op when nothing was written.
 touch disk until there's something to persist.
 **Phase.** Built.
 
+## D28 — A `fetch` tool: Bun-native, HTML → Markdown
+**Decision.** A `fetch` tool over **Bun's native `fetch`** (no deps): HTTP(S) **GET** a URL → **HTML is
+converted to Markdown** (lean regex converter `htmlToMarkdown` — keeps headings/links/lists/code/bold,
+drops `<script>`/`<style>`/chrome, decodes entities **once at the end** so code with `&lt;…&gt;` survives),
+**JSON** pretty-printed, other text as-is. `readonly:true` (a GET for info-gathering → PLAN-safe). Caps:
+30s timeout, browser UA, follows redirects, skips binary/>5 MB, output capped at 60 k chars. The export
+is `fetchTool` (not `fetch`) so it doesn't shadow the global.
+**Why.** nerve had no web access; the user wants the agent to read pages/docs/JSON APIs. HTML→Markdown
+**cuts tokens** and reads better. Bun-native + a small local converter keeps the zero-dep ethos.
+**Rejected.** A `turndown`/`html-to-text` **dependency** (~50 lines of local code suffices); a sub-model
+summarization of the page (the agent reads the Markdown directly — leaner, no extra call); non-GET
+methods (read-only for now). **Refine later:** swap the regex converter for Bun's `HTMLRewriter` if quality demands.
+**Phase.** Built, live-verified (example.com → Markdown).
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
