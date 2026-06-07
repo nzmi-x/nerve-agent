@@ -73,14 +73,6 @@ let syntaxStyle = buildSyntaxStyle();
 
 type Content = string | ReturnType<typeof t>;
 
-const HELP = [
-  "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
-  "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Alt+Enter newline · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · PgUp/PgDn scroll · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
-  "edit      readline (= zsh): Ctrl+A/E line start/end · Ctrl+W del word · Ctrl+K/U kill to end/start · Alt+B/F word back/fwd · Alt+D del word · ←/→ move (Ctrl+B is sidebar, not move-back)",
-  "copy      selection, Ctrl+Shift+C/V, right-click are your terminal's now (nerve no longer grabs the mouse/keyboard)",
-].join("\n");
-
 export interface TuiOptions {
   models: ModelEntry[];
   entry: ModelEntry;
@@ -144,6 +136,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
+  // A reusable interactive command picker (e.g. /sessions, /model): a popup list with ↑/↓ + Enter, and an
+  // optional `d`-to-delete action per row. Replaces typing `/command <param>` with a selection.
+  interface PickerItem {
+    label: string;
+    desc?: string;
+    current?: boolean;
+  }
+  let picker: { title: string; items: PickerItem[]; sel: number; onPick: (i: number) => void; onDelete?: (i: number) => void } | null = null;
 
   // --- layout ---------------------------------------------------------------
   // Web-app mindset (D29): a flex *row* — the main column (transcript/input/status) grows to fill, and a
@@ -537,10 +537,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const suggestOpen = (): boolean => suggest.items.length > 0;
   const clearSuggest = (): void => {
     suggest = { kind: "none", items: [], sel: 0 };
-    if (!asking) setPopup([]);
+    if (!asking && !picker) setPopup([]);
   };
   const renderSuggest = (): void => {
-    if (asking) return;
+    if (asking || picker) return;
     // dynamic columns: name column fits the longest name; description fills the rest of the width
     const colW = Math.max(0, ...suggest.items.map((it) => it.name.length)) + 2;
     const budget = Math.max(10, renderer.width - colW - 6);
@@ -554,7 +554,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     );
   };
   async function updateSuggestions(value: string): Promise<void> {
-    if (asking) return;
+    if (asking || picker) return;
     const aff = parseAffordance(value);
     if (aff.kind === "at") {
       const paths = await atSuggestions(aff.query, cwd);
@@ -591,6 +591,28 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       asking = { req, sel: rec >= 0 ? rec : 0, resolve };
       renderAsk();
     });
+  }
+
+  const renderPicker = (): void => {
+    if (!picker) return;
+    const rows: PopupRow[] = [{ content: picker.title, fg: ACCENT, bold: true }];
+    picker.items.forEach((it, i) => {
+      const sel = i === picker!.sel;
+      const label = `${it.current ? "● " : "  "}${it.label}`;
+      const desc = it.desc ? `   ${trunc(it.desc, Math.max(16, renderer.width - label.length - 14))}` : "";
+      rows.push({ content: `${label}${desc}`, fg: sel ? WHITE : it.current ? GREEN : MUTE, bg: sel ? SELBG : undefined, bold: sel });
+    });
+    setPopup(rows);
+  };
+  function openPicker(p: { title: string; items: PickerItem[]; onPick: (i: number) => void; onDelete?: (i: number) => void }): void {
+    if (!p.items.length) return;
+    suggest = { kind: "none", items: [], sel: 0 };
+    picker = { ...p, sel: Math.max(0, p.items.findIndex((it) => it.current)) };
+    renderPicker();
+  }
+  function closePicker(): void {
+    picker = null;
+    setPopup([]);
   }
 
   // --- status ---------------------------------------------------------------
@@ -731,33 +753,78 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     setStatus();
   }
 
-  // /sessions — list sessions; /sessions delete <id> removes one (not the current — that's /drop).
-  function sessionsCommand(args: string[]): void {
-    const sub = args[0];
-    if (sub === "delete" || sub === "rm") {
-      const id = args[1];
-      if (!id) return void addPlain("usage: /sessions delete <id>", () => MUTE);
-      if (id === session.id) return void addPlain("✗ that's the current session — use /drop", () => RED);
-      if (!sessionExists(cwd, id)) return void addPlain(`✗ no session '${id}'`, () => RED);
-      deleteSession(cwd, id);
-      addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
-      return;
-    }
+  // /sessions — an interactive picker: ↑/↓ navigate · Enter resume · d delete · Esc close.
+  function sessionsCommand(): void {
     const list = listSessions(cwd);
     if (!list.length) return void addPlain("no sessions yet", () => MUTE);
-    addText(() => t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
-    for (const s of list) {
-      const cur = s.id === session.id;
-      const label = s.title || s.preview;
-      addText(() => t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(s.title ? CYAN : DIM)(trunc(label, Math.max(16, renderer.width - 52)))}`);
-    }
+    openPicker({
+      title: "sessions · ↑/↓ · Enter resume · d delete · Esc close",
+      items: list.map((s) => ({ label: s.title || s.preview || s.id, desc: `${s.msgs} msg · ${rel(s.mtimeMs)}`, current: s.id === session.id })),
+      onPick: (i) => {
+        const s = list[i]!;
+        if (s.id === session.id) return void addPlain("already on this session", () => MUTE);
+        void resumeSession(s.id);
+      },
+      onDelete: (i) => {
+        const s = list[i]!;
+        if (s.id === session.id) return void addPlain("✗ can't delete the current session — use /drop", () => RED);
+        deleteSession(cwd, s.id);
+        closePicker();
+        sessionsCommand(); // re-open with the updated list (or show "no sessions yet" if now empty)
+      },
+    });
+  }
+
+  // Color-coded /help: section headers (accent), command names (cyan), keys (yellow), descriptions (muted).
+  function renderHelp(): void {
+    const sec = (s: string): void => void addText(() => t`${bold(fg(ACCENT)(s))}`);
+    const cmd = (name: string, desc: string): void => void addText(() => t`  ${fg(CYAN)(name.padEnd(18))} ${fg(MUTE)(desc)}`);
+    const key = (k: string, desc: string): void => void addText(() => t`  ${fg(YELLOW)(k.padEnd(16))} ${fg(MUTE)(desc)}`);
+    spacer();
+    sec("commands");
+    cmd("/help", "this help");
+    cmd("/sessions", "browse sessions — ↑/↓ · Enter resume · d delete");
+    cmd("/resume", "resume the last session");
+    cmd("/model [id]", "switch model — a picker if no id");
+    cmd("/mode plan|edit", "set the permission mode");
+    cmd("/compact [focus]", "summarize old turns to reclaim context");
+    cmd("/clear", "clear the transcript (keep the session)");
+    cmd("/reload", "hot-reload tools + interceptors");
+    cmd("/drop", "delete this session, start a fresh one");
+    cmd("/balance", "refresh the provider balance");
+    cmd("/quit", "exit nerve");
+    spacer();
+    sec("input");
+    cmd("@path", "reference a file");
+    cmd("!cmd", "run a shell command directly (full authority)");
+    cmd("/name", "a built-in command or a skill");
+    spacer();
+    sec("keys");
+    key("Enter", "send  ·  Alt+Enter newline");
+    key("Tab", "accept suggestion / toggle mode");
+    key("Shift+Tab", "toggle PLAN ↔ EDIT");
+    key("↑ / ↓", "navigate popups");
+    key("PgUp / PgDn", "scroll the transcript");
+    key("Ctrl+B", "toggle sidebar");
+    key("Ctrl+R", "reload");
+    key("ESC", "stop the turn / close a popup");
+    key("Ctrl+C", "quit");
+    spacer();
+    sec("edit  (readline = zsh)");
+    key("Ctrl+A / Ctrl+E", "start / end of line");
+    key("Ctrl+W", "delete word back");
+    key("Ctrl+K / Ctrl+U", "kill to end / start");
+    key("Alt+B / Alt+F", "word back / forward");
+    spacer();
+    sec("copy / paste");
+    addText(() => t`  ${fg(MUTE)("selection, Ctrl+Shift+C/V, and right-click are your terminal's")}`);
   }
 
   async function runCommand(value: string): Promise<void> {
     const { name, args } = parseSlash(value);
     switch (name) {
       case "help":
-        addPlain(HELP, () => MUTE);
+        renderHelp();
         return;
       case "exit":
       case "quit":
@@ -780,19 +847,30 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return;
       }
       case "model": {
+        const apply = (entry: ModelEntry): void => {
+          try {
+            provider = providerFor(entry); // may throw if the key is missing — leave `active` unchanged then
+            active = entry;
+            setStatus(); // the model id (status bar + session panel) is the indicator
+            void refreshBalance();
+          } catch (e) {
+            addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
+          }
+        };
         const id = args[0];
-        if (!id) {
-          addPlain(`models: ${models.map((m) => m.id).join(", ")}`, () => MUTE);
+        if (id) {
+          try {
+            apply(selectModel(models, id));
+          } catch (e) {
+            addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
+          }
           return;
         }
-        try {
-          active = selectModel(models, id);
-          provider = providerFor(active);
-          setStatus(); // the model id (status bar + session panel) is the indicator
-          void refreshBalance();
-        } catch (e) {
-          addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
-        }
+        openPicker({
+          title: "model · ↑/↓ · Enter select · Esc close",
+          items: models.map((m) => ({ label: m.id, desc: m.label, current: m.id === active.id })),
+          onPick: (i) => apply(models[i]!),
+        });
         return;
       }
       case "balance":
@@ -800,9 +878,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         addPlain(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, () => MUTE);
         return;
       case "resume":
-        return void resumeSession(args[0]);
+        return void resumeSession(); // last session only — pick a specific one from /sessions
       case "sessions":
-        return void sessionsCommand(args);
+        return void sessionsCommand();
       default: {
         // D16: a markdown command file → expand its body and submit it as a prompt.
         const cmd = commands.find((c) => c.name === name);
@@ -994,6 +1072,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         a.resolve(a.req.options[a.sel]!.label);
         return;
       }
+      if (picker) {
+        const p = picker;
+        const i = p.sel;
+        closePicker();
+        p.onPick(i); // Enter → primary action (resume / select)
+        return;
+      }
       if (suggestOpen()) {
         const it = suggest.items[suggest.sel];
         if (it && suggest.kind === "slash") return void submit(`/${it.insert}`); // `/ex`↵ → run /exit
@@ -1014,6 +1099,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
 
     if (asking) {
+      key.preventDefault(); // own every key while the picker blocks the turn
+      key.stopPropagation();
       if (key.name === "up") {
         asking.sel = Math.max(0, asking.sel - 1);
         renderAsk();
@@ -1022,6 +1109,23 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         renderAsk();
       }
       return;
+    }
+
+    if (picker) {
+      key.preventDefault(); // own every key while open so none leak into the (hidden) Textarea
+      key.stopPropagation();
+      if (key.name === "up") {
+        picker.sel = Math.max(0, picker.sel - 1);
+        renderPicker();
+      } else if (key.name === "down") {
+        picker.sel = Math.min(picker.items.length - 1, picker.sel + 1);
+        renderPicker();
+      } else if (key.name === "d" && picker.onDelete) {
+        picker.onDelete(picker.sel); // 'd' → delete the highlighted row (the handler re-renders/closes)
+      } else if (key.name === "escape") {
+        closePicker();
+      }
+      return; // swallow everything else while the picker is open (Enter handled in the Enter-family block)
     }
 
     if (key.shift && key.name === "tab") return void toggleMode(); // Shift+Tab toggles mode (even over a popup)
