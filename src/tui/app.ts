@@ -43,30 +43,35 @@ import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
 // Palette — inherited from ghostty's Adwaita / Adwaita Dark, picked by the GNOME light/dark scheme (D30).
-const { FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme();
+// `let` (not `const`) so a live system light/dark change can reassign it and the UI re-themes in place.
+let { FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme();
 
-const syntaxStyle = SyntaxStyle.fromStyles({
-  default: { fg: RGBA.fromHex(FG) },
-  "markup.heading": { fg: RGBA.fromHex(ACCENT), bold: true },
-  "markup.heading.1": { fg: RGBA.fromHex(ACCENT), bold: true },
-  "markup.heading.2": { fg: RGBA.fromHex(CYAN), bold: true },
-  "markup.bold": { fg: RGBA.fromHex(YELLOW), bold: true },
-  "markup.italic": { italic: true },
-  "markup.list": { fg: RGBA.fromHex(MAGENTA) },
-  "markup.raw": { fg: RGBA.fromHex(GREEN) },
-  "markup.link": { fg: RGBA.fromHex(CYAN), underline: true },
-  "markup.quote": { fg: RGBA.fromHex(DIM), italic: true },
-  keyword: { fg: RGBA.fromHex(MAGENTA) },
-  string: { fg: RGBA.fromHex(GREEN) },
-  comment: { fg: RGBA.fromHex(DIM), italic: true },
-  function: { fg: RGBA.fromHex(ACCENT) },
-  number: { fg: RGBA.fromHex(ORANGE) },
-  boolean: { fg: RGBA.fromHex(ORANGE) },
-  type: { fg: RGBA.fromHex(CYAN) },
-  property: { fg: RGBA.fromHex(CYAN) },
-  operator: { fg: RGBA.fromHex(CYAN) },
-  punctuation: { fg: RGBA.fromHex(MUTE) },
-});
+// Built from the current palette; rebuilt on a live theme change (D30) so existing markdown can re-theme.
+function buildSyntaxStyle(): SyntaxStyle {
+  return SyntaxStyle.fromStyles({
+    default: { fg: RGBA.fromHex(FG) },
+    "markup.heading": { fg: RGBA.fromHex(ACCENT), bold: true },
+    "markup.heading.1": { fg: RGBA.fromHex(ACCENT), bold: true },
+    "markup.heading.2": { fg: RGBA.fromHex(CYAN), bold: true },
+    "markup.bold": { fg: RGBA.fromHex(YELLOW), bold: true },
+    "markup.italic": { italic: true },
+    "markup.list": { fg: RGBA.fromHex(MAGENTA) },
+    "markup.raw": { fg: RGBA.fromHex(GREEN) },
+    "markup.link": { fg: RGBA.fromHex(CYAN), underline: true },
+    "markup.quote": { fg: RGBA.fromHex(DIM), italic: true },
+    keyword: { fg: RGBA.fromHex(MAGENTA) },
+    string: { fg: RGBA.fromHex(GREEN) },
+    comment: { fg: RGBA.fromHex(DIM), italic: true },
+    function: { fg: RGBA.fromHex(ACCENT) },
+    number: { fg: RGBA.fromHex(ORANGE) },
+    boolean: { fg: RGBA.fromHex(ORANGE) },
+    type: { fg: RGBA.fromHex(CYAN) },
+    property: { fg: RGBA.fromHex(CYAN) },
+    operator: { fg: RGBA.fromHex(CYAN) },
+    punctuation: { fg: RGBA.fromHex(MUTE) },
+  });
+}
+let syntaxStyle = buildSyntaxStyle();
 
 type Content = string | ReturnType<typeof t>;
 
@@ -127,6 +132,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let turnAbort: AbortController | null = null;
   let lineId = 0;
   let echoGuard: string | null = null;
+  let pendingRetheme = false; // a system light/dark change arrived mid-turn — apply it once idle (D30)
+  let themeMonitor: ReturnType<typeof Bun.spawn> | null = null;
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
@@ -192,7 +199,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     todoBox.add(tr);
     todoRows.push(tr);
   }
+  let currentTodos: Todo[] = []; // last set — replayed by retheme to recolor the panel (D30)
   const setTodos = (todos: Todo[]): void => {
+    currentTodos = todos;
     const shown = todos.slice(0, MAX_TODO_ROWS - 1);
     const rows: Content[] = [];
     if (shown.length) {
@@ -277,39 +286,120 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   (renderer as { on?: (e: string, cb: () => void) => void }).on?.("resize", () => applySidebar());
 
   // --- transcript -----------------------------------------------------------
-  const lineIds: string[] = [];
-  const addText = (content: Content, fgColor = FG, attributes = 0): TextRenderable => {
-    const tr = new TextRenderable(renderer, { id: `ln-${lineId++}`, content, fg: fgColor, attributes });
-    transcript.add(tr);
-    lineIds.push(tr.id);
-    return tr;
+  // Every line keeps what it needs to re-render itself, so a live theme change (D30) recolors in place with
+  // **zero loss**: `text` lines rebuild from their `make` thunk (it re-reads the palette); `plain` lines —
+  // incl. the streaming reasoning line, which accumulates via `.content +=` — just recolor `fg`; `md` blocks
+  // swap `syntaxStyle` + re-set content. Everything added to the transcript goes through these helpers.
+  type Line =
+    | { kind: "text"; el: TextRenderable; make: () => Content }
+    | { kind: "plain"; el: TextRenderable; role: () => string }
+    | { kind: "md"; el: MarkdownRenderable };
+  const lines: Line[] = [];
+  // Styled line whose colours live in its content (a `t`…` thunk) — re-run verbatim on a theme change.
+  const addText = (make: () => Content): TextRenderable => {
+    const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: make(), fg: FG });
+    transcript.add(el);
+    lines.push({ kind: "text", el, make });
+    return el;
+  };
+  // Plain-text line tinted by one role colour (recoloured via `fg`); supports `.content +=` growth.
+  const addPlain = (text: string, role: () => string = () => FG, attributes = 0): TextRenderable => {
+    const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: text, fg: role(), attributes });
+    transcript.add(el);
+    lines.push({ kind: "plain", el, role });
+    return el;
   };
   const addMarkdown = (): MarkdownRenderable => {
-    const md = new MarkdownRenderable(renderer, { id: `md-${lineId++}`, width: "100%", content: "", syntaxStyle, streaming: true });
-    transcript.add(md);
-    lineIds.push(md.id);
-    return md;
+    const el = new MarkdownRenderable(renderer, { id: `md-${lineId++}`, width: "100%", content: "", syntaxStyle, streaming: true });
+    transcript.add(el);
+    lines.push({ kind: "md", el });
+    return el;
   };
-  const spacer = (): void => void addText("");
+  // Replace a styled line's content and remember the new thunk (so it survives a later theme change).
+  const setText = (el: TextRenderable, make: () => Content): void => {
+    const ln = lines.find((l) => l.el === el);
+    if (ln?.kind === "text") ln.make = make;
+    el.content = make();
+  };
+  const removeLine = (el: TextRenderable | MarkdownRenderable): void => {
+    transcript.remove(el.id);
+    const i = lines.findIndex((l) => l.el === el);
+    if (i >= 0) lines.splice(i, 1);
+  };
+  const spacer = (): void => void addText(() => "");
   const clearTranscript = (): void => {
-    for (const id of lineIds) transcript.remove(id);
-    lineIds.length = 0;
+    for (const l of lines) transcript.remove(l.el.id);
+    lines.length = 0;
+  };
+  // Re-theme the whole UI in place after a live light/dark switch (D30). Idle-only (deferred while busy).
+  const retheme = (): void => {
+    ({ FG, MUTE, DIM, BORDER, ACCENT, GREEN, YELLOW, RED, MAGENTA, CYAN, ORANGE, SELBG, PANEL, DARKFG, WHITE } = pickTheme());
+    syntaxStyle = buildSyntaxStyle();
+    renderer.setBackgroundColor(DARKFG);
+    transcriptBox.borderColor = BORDER;
+    inputBox.borderColor = BORDER;
+    sessionPanel.borderColor = BORDER;
+    filesPanel.borderColor = BORDER;
+    status.bg = PANEL;
+    prompt.fg = ACCENT;
+    input.textColor = FG;
+    input.cursorColor = ACCENT;
+    for (const l of lines) {
+      if (l.kind === "text") l.el.content = l.make();
+      else if (l.kind === "plain") l.el.fg = l.role();
+      else {
+        l.el.syntaxStyle = syntaxStyle;
+        l.el.content = l.el.content; // re-set to reparse with the new style
+      }
+    }
+    setTodos(currentTodos); // recolor the todo panel pool
+    setStatus(); // recolors the status bar + sidebar panels
+  };
+  // Apply a theme change now if idle, else once the current turn finishes (don't repaint mid-stream).
+  const requestRetheme = (): void => {
+    if (busy) pendingRetheme = true;
+    else retheme();
+  };
+  const drainRetheme = (): void => {
+    if (!pendingRetheme) return;
+    pendingRetheme = false;
+    retheme();
+  };
+  // Follow the GNOME light/dark scheme live (D30): `gsettings monitor` emits a line on each change — the
+  // same signal ghostty resolves `theme = light:…,dark:…` against. Killed on exit. `$NERVE_THEME` opts out.
+  const watchSystemTheme = (): void => {
+    if (Bun.env.NERVE_THEME) return;
+    try {
+      themeMonitor = Bun.spawn(["gsettings", "monitor", "org.gnome.desktop.interface", "color-scheme"], { stdout: "pipe", stderr: "ignore" });
+    } catch {
+      return; // no gsettings (not GNOME) — stay on the startup theme
+    }
+    void (async () => {
+      try {
+        for await (const chunk of themeMonitor!.stdout as ReadableStream<Uint8Array>) {
+          void chunk;
+          if (pickTheme().DARKFG !== DARKFG) requestRetheme(); // ground actually flipped
+        }
+      } catch {
+        /* monitor ended — keep the current theme */
+      }
+    })();
   };
   // Replay loaded messages into the transcript (for /resume). Reasoning isn't replayed (telemetry only).
   const renderHistory = (messages: Message[]): void => {
     for (const m of messages) {
       if (m.role === "user") {
         spacer();
-        addText(t`${bold(fg(GREEN)("❯"))} ${m.content}`);
+        addText(() => t`${bold(fg(GREEN)("❯"))} ${m.content}`);
       } else if (m.role === "assistant") {
         if (m.content) {
           const md = addMarkdown();
           md.content = m.content;
           md.streaming = false;
         }
-        for (const tc of m.toolCalls ?? []) addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(tc.name)}`);
+        for (const tc of m.toolCalls ?? []) addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(tc.name)}`);
       } else if (m.role === "tool") {
-        addText(t`${fg(DIM)("⎿")} ${fg(DIM)(firstLine(m.content))}`);
+        addText(() => t`${fg(DIM)("⎿")} ${fg(DIM)(firstLine(m.content))}`);
       }
     }
   };
@@ -423,11 +513,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function runShell(cmd: string): Promise<void> {
     const c = cmd.trim();
     if (!c) return;
-    addText(t`${bold(fg(YELLOW)("$"))} ${c}`);
+    addText(() => t`${bold(fg(YELLOW)("$"))} ${c}`);
     try {
-      addText(await bash.run({ command: c }, { cwd }), MUTE); // full authority, ungated, not added to the session
+      addPlain(await bash.run({ command: c }, { cwd }), () => MUTE); // full authority, ungated, not added to the session
     } catch (e) {
-      addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
+      addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
     }
   }
 
@@ -437,25 +527,26 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (busy) return;
     const cut = pickCutPoint(session.messages, KEEP_TOKENS);
     if (cut < 2) {
-      addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)("nothing old enough to compact yet")}`);
+      addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)("nothing old enough to compact yet")}`);
       return;
     }
     busy = true;
     setStatus();
-    const note = addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)("compacting…")}`);
+    const note = addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)("compacting…")}`);
     turnAbort = new AbortController();
     try {
       const input = pruneToolOutputs(session.messages.slice(0, cut)).messages; // shrink the summarizer's input
       const keep = session.messages.length - cut;
       const summary = await summarize(provider, active.id, input, compactionPrompt, focus, turnAbort.signal);
       session.compact(summary, keep);
-      note.content = t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`;
+      setText(note, () => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`compacted ${cut} earlier message(s) → summary · ${session.messages.length} now in context`)}`);
     } catch (e) {
-      note.content = t`${fg(RED)("✗")} ${fg(MUTE)(`compaction failed: ${e instanceof Error ? e.message : String(e)}`)}`;
+      setText(note, () => t`${fg(RED)("✗")} ${fg(MUTE)(`compaction failed: ${e instanceof Error ? e.message : String(e)}`)}`);
     } finally {
       busy = false;
       turnAbort = null;
       setStatus();
+      drainRetheme(); // D30
     }
   }
 
@@ -471,8 +562,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       icErr = e instanceof Error ? e.message : String(e);
     }
     if (rt.ok) tools = toolSpecs(); // refresh provider-facing specs for the next turn
-    if (rt.ok && !icErr) addText(t`${fg(GREEN)("↻")} ${fg(MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
-    else addText(`✗ reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`, RED);
+    if (rt.ok && !icErr) addText(() => t`${fg(GREEN)("↻")} ${fg(MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
+    else addPlain(`✗ reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`, () => RED);
   }
 
   // D26: auto-title the session from its first exchange (best-effort, async, non-blocking). The title
@@ -511,7 +602,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
-    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
+    addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
     setStatus();
   }
 
@@ -519,8 +610,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function resumeSession(idArg?: string): Promise<void> {
     if (busy) return;
     const id = idArg ?? lastSessionId(sessionsDir(cwd), session.id);
-    if (!id) return void addText("no other session to resume", MUTE);
-    if (!existsSync(join(sessionsDir(cwd), `${id}.jsonl`))) return void addText(`✗ no session '${id}'`, RED);
+    if (!id) return void addPlain("no other session to resume", () => MUTE);
+    if (!existsSync(join(sessionsDir(cwd), `${id}.jsonl`))) return void addPlain(`✗ no session '${id}'`, () => RED);
     await session.close();
     session = new Session({ id, resume: true });
     meter = new UsageMeter();
@@ -529,7 +620,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
-    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`)}`);
+    addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`)}`);
     setStatus();
   }
 
@@ -538,23 +629,23 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const sub = args[0];
     if (sub === "delete" || sub === "rm") {
       const id = args[1];
-      if (!id) return void addText("usage: /sessions delete <id>", MUTE);
-      if (id === session.id) return void addText("✗ that's the current session — use /drop", RED);
+      if (!id) return void addPlain("usage: /sessions delete <id>", () => MUTE);
+      if (id === session.id) return void addPlain("✗ that's the current session — use /drop", () => RED);
       try {
         unlinkSync(join(sessionsDir(cwd), `${id}.jsonl`));
-        addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
+        addText(() => t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`deleted ${id}`)}`);
       } catch {
-        addText(`✗ no session '${id}'`, RED);
+        addPlain(`✗ no session '${id}'`, () => RED);
       }
       return;
     }
     const list = listSessions(sessionsDir(cwd));
-    if (!list.length) return void addText("no sessions yet", MUTE);
-    addText(t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
+    if (!list.length) return void addPlain("no sessions yet", () => MUTE);
+    addText(() => t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
     for (const s of list) {
       const cur = s.id === session.id;
       const label = s.title || s.preview;
-      addText(t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(s.title ? CYAN : DIM)(trunc(label, Math.max(16, renderer.width - 52)))}`);
+      addText(() => t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(s.title ? CYAN : DIM)(trunc(label, Math.max(16, renderer.width - 52)))}`);
     }
   }
 
@@ -562,7 +653,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const { name, args } = parseSlash(value);
     switch (name) {
       case "help":
-        addText(HELP, MUTE);
+        addPlain(HELP, () => MUTE);
         return;
       case "exit":
       case "quit":
@@ -581,13 +672,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         if (m === "plan" || m === "edit") {
           mode = m;
           setStatus(); // badge is the indicator
-        } else addText("usage: /mode plan|edit", MUTE);
+        } else addPlain("usage: /mode plan|edit", () => MUTE);
         return;
       }
       case "model": {
         const id = args[0];
         if (!id) {
-          addText(`models: ${models.map((m) => m.id).join(", ")}`, MUTE);
+          addPlain(`models: ${models.map((m) => m.id).join(", ")}`, () => MUTE);
           return;
         }
         try {
@@ -596,13 +687,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           setStatus(); // the model id (status bar + session panel) is the indicator
           void refreshBalance();
         } catch (e) {
-          addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
+          addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
         }
         return;
       }
       case "balance":
         await refreshBalance();
-        addText(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, MUTE);
+        addPlain(`balance: ${formatBalance(balance)}${active.provider === "gemini" ? "  (Gemini has no balance API)" : ""}`, () => MUTE);
         return;
       case "resume":
         return void resumeSession(args[0]);
@@ -612,7 +703,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         // D16: a markdown command file → expand its body and submit it as a prompt.
         const cmd = commands.find((c) => c.name === name);
         if (cmd) return void submit(expandCommand(cmd.body, args));
-        addText(skills.some((s) => s.name === name) ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")` : `unknown command: /${name} (try /help)`, MUTE);
+        addPlain(skills.some((s) => s.name === name) ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")` : `unknown command: /${name} (try /help)`, () => MUTE);
       }
     }
   }
@@ -628,12 +719,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     busy = true;
     setStatus();
     spacer();
-    addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
+    addText(() => t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
     await runAgentTurn();
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
+    drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     input.focus();
   }
 
@@ -664,7 +756,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
-            reasoningLine ??= addText("✻ ", DIM, TextAttributes.ITALIC);
+            reasoningLine ??= addPlain("✻ ", () => DIM, TextAttributes.ITALIC);
             reasoningLine.content += d;
           }),
           ic.tokenTap(session),
@@ -684,18 +776,18 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         },
         onToolResult: (name, result) => {
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
-          addText(t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);
+          addText(() => t`${fg(DIM)("⎿")} ${fg(MUTE)(name)}  ${fg(DIM)(firstLine(result))}`);
         },
         onRetry: ({ delayMs, model }) => {
-          transcript.remove(answer.id); // drop the failed (usually empty) attempt
+          removeLine(answer); // drop the failed (usually empty) attempt
           reasoningLine = null;
-          addText(t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
+          addText(() => t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
           answer = addMarkdown(); // fresh block for the retried attempt
         },
-        onError: (e) => addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED),
+        onError: (e) => addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED),
       });
     } catch (e) {
-      addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
+      addPlain(`✗ ${e instanceof Error ? e.message : String(e)}`, () => RED);
     } finally {
       answer.streaming = false;
       turnAbort = null;
@@ -711,22 +803,21 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     let issues = false;
     for (const pack of activePacks(edited)) {
       const files = [...edited].filter((f) => langForFile(f) === pack);
-      const note = addText(t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
+      const note = addText(() => t`${fg(DIM)("⚙")} ${fg(MUTE)(`post-edit (${pack.id})…`)}`);
       const res = await runHooks(pack, files, cwd);
-      note.content = res.summary || note.content;
-      note.fg = MUTE;
+      if (res.summary) setText(note, () => t`${fg(MUTE)(res.summary)}`);
       if (res.summary) summaries.push(res.summary);
       issues ||= res.issues;
     }
     if (!issues) return;
     const issueSummary = summaries.join("\n\n");
     if (issueSummary === prevIssues) {
-      addText(t`${fg(YELLOW)("⚠")} ${fg(MUTE)("post-edit issues unchanged after a fix attempt — leaving them for you")}`);
+      addText(() => t`${fg(YELLOW)("⚠")} ${fg(MUTE)("post-edit issues unchanged after a fix attempt — leaving them for you")}`);
       return;
     }
     // Hand the failing checks back; the agent triages (fix critical/quick, defer non-critical).
     session.addUser(triagePrompt(summaries));
-    addText(t`${fg(YELLOW)("↪")} ${fg(MUTE)("post-edit checks failed — agent triaging…")}`);
+    addText(() => t`${fg(YELLOW)("↪")} ${fg(MUTE)("post-edit checks failed — agent triaging…")}`);
     await runAgentTurn(issueSummary);
   }
 
@@ -735,6 +826,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     turnAbort?.abort();
+    themeMonitor?.kill(); // stop following the system theme (D30)
     await session.close();
     await opts.lsp?.stop();
     renderer.destroy();
@@ -823,8 +915,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
-  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
+  addText(() => t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
+  watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
 }
 

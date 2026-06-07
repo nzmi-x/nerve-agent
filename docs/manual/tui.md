@@ -10,9 +10,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Responsive row layout** ([D29](../DECISIONS.md)): the root is a flex **row** — a **`mainCol`**
   (`flexGrow:1`, `minWidth:0`) holding the stack below, plus a fixed **34-col sidebar**.
 - **Theme** ([D30](../DECISIONS.md)): the palette comes from `src/tui/theme.ts` (`pickTheme()`), inheriting
-  ghostty's Adwaita / Adwaita Dark by reading the GNOME `color-scheme` (`gsettings`) at startup —
-  `$NERVE_THEME=light|dark` forces it. `app.ts` destructures the roles, so every `FG`/`MUTE`/… (incl. the
-  markdown `SyntaxStyle`) is theme-driven with no other change.
+  ghostty's Adwaita / Adwaita Dark by reading the GNOME `color-scheme` (`gsettings`) — `$NERVE_THEME=light|dark`
+  forces it. It **live-follows** the system: a `gsettings monitor` subprocess re-themes the UI **in place**
+  on a dark/light flip (palette reassigned, `SyntaxStyle` rebuilt, chrome recoloured, and every transcript
+  line re-rendered from a stored thunk → zero loss). A flip mid-stream is deferred to turn end.
 - Main column: a **bordered transcript** `Box` (rounded, title " ◆ &lt;title&gt; ") wrapping a `ScrollBox`
   (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
   in place by the `todo` tool via `ctx.setTodos`; height 0 when empty) · a `popup` `Box` (autosuggest

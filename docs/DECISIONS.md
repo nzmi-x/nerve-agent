@@ -680,27 +680,36 @@ starts empty and refills as the agent works).
 OpenTUI props but there's no TTY in the build env, so the visual layout (panel sizing, breakpoint, toggle)
 must be eyeballed. Add a panel = another bordered box + a pooled-row render in the sidebar block of `app.ts`.
 
-## D30 — TUI theme inherited from ghostty (Adwaita / Adwaita Dark), GNOME light/dark aware
+## D30 — TUI theme inherited from ghostty (Adwaita / Adwaita Dark), GNOME light/dark aware + **live-following**
 **Decision.** The palette lives in `src/tui/theme.ts` (`pickTheme()`), not hardcoded in `app.ts`. We mirror
-the user's ghostty `theme = light:Adwaita,dark:Adwaita Dark` by detecting the **GNOME color-scheme** —
+the user's ghostty `theme = light:Adwaita,dark:Adwaita Dark` by reading the **GNOME color-scheme** —
 `gsettings get org.gnome.desktop.interface color-scheme` (the *same* signal ghostty resolves that line
-against) — at **startup** and applying the matching Adwaita palette. Accent colours are ghostty's own
+against) — and applying the matching Adwaita palette. Accent colours are ghostty's own
 `/usr/share/ghostty/themes/Adwaita[ Dark]` values; the chrome roles a 16-colour terminal palette doesn't
 define (border/panel/selection/dim) are **derived** for legibility on each ground (and, for light, accents
 darkened to the libadwaita ramp so coloured text + the inverted EDIT/PLAN badges stay readable on white).
-`app.ts` just destructures `pickTheme()` — every existing `FG`/`MUTE`/… reference (incl. the markdown
-`SyntaxStyle`) is unchanged. `$NERVE_THEME=light|dark` forces one; off-GNOME falls back to dark.
-**Why.** The user runs ghostty with system-following Adwaita and wanted nerve to match rather than clash
-with a fixed Tokyo-Night. Reading the *same* gsettings key ghostty uses keeps them in lockstep without nerve
-having to parse ghostty's config. Detection is sync (`Bun.spawnSync`) at module load, so the constants stay
-module-level — minimal diff.
-**Rejected.** **Live-following** the scheme mid-session (a relaunch re-detects — not worth a gsettings
-watcher in a TUI); **parsing ghostty's config/theme files at runtime** (path varies by distro/install — the
-values are stable, so we embed them and read gsettings only for the light/dark choice); using the
-terminal's own ANSI colours (nerve needs specific roles for syntax + chrome that ANSI 16 doesn't pin down);
-keeping Tokyo Night (clashed with the user's Adwaita ghostty).
-**Phase.** Built (Phase 1.5), auto-detect verified (this box is `prefer-dark` → Adwaita Dark `#1d1d20`;
-`NERVE_THEME=light` → `#ffffff`). Colour *legibility* still wants a real-terminal eyeball (esp. light mode).
+`$NERVE_THEME=light|dark` forces one; off-GNOME falls back to dark.
+- **Live-following (zero loss).** `app.ts` runs `gsettings monitor …color-scheme` (a subprocess, killed on
+  exit like the LSP servers) and **re-themes in place** when the system flips — no relaunch. The palette is
+  `let` (reassigned via `pickTheme()`), the markdown `SyntaxStyle` is rebuilt, chrome props (`borderColor`/
+  `bg`/`fg`/`textColor`) are reassigned, and **every transcript line re-renders itself**: each line keeps a
+  re-runnable thunk — `text` lines rebuild their `t`…`` content (re-reading the palette), `plain`/streaming
+  lines (incl. the accumulating reasoning line) recolour `fg`, `md` blocks swap `syntaxStyle`. So **nothing
+  is lost** on a switch (vs. re-rendering only `session.messages`). A change arriving mid-stream is **deferred**
+  to turn end (`pendingRetheme` → `drainRetheme`) so we never repaint a live-streaming block.
+**Why.** The user runs ghostty with system-following Adwaita and wanted nerve to match *and track* it, not
+clash with a fixed Tokyo-Night or need a relaunch. Reading the *same* gsettings key ghostty uses keeps them
+in lockstep without parsing ghostty's config.
+**Rejected.** **Startup-only** detection (the user explicitly wanted live switching); **re-rendering from
+`session.messages`** on switch (drops ephemeral scrollback — tool-result lines, `/help`, `!`shell — so the
+per-line thunk model is used instead, full fidelity); **parsing ghostty's config/theme files at runtime**
+(path varies by distro/install — the values are stable, so we embed them and read gsettings only for the
+light/dark choice); using the terminal's own ANSI colours (nerve needs specific syntax + chrome roles ANSI
+16 doesn't pin down); keeping Tokyo Night (clashed with the user's Adwaita ghostty).
+**Phase.** Built (Phase 1.5). Verified: auto-detect (this box is `prefer-dark` → Adwaita Dark `#1d1d20`;
+`NERVE_THEME=light` → `#ffffff`), `gsettings monitor` is a valid long-running command, app.ts loads clean.
+**Still needs a real-terminal eyeball** — the live in-place re-theme (toggle GNOME dark/light while nerve
+runs) and colour legibility (esp. light mode) can't be seen without a TTY.
 
 ---
 
