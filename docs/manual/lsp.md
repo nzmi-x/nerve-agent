@@ -14,7 +14,12 @@ missing-server hint). vtsls path verified for the missing case — `bun install 
 - **`client.ts`** spawns the server (`Bun.spawn`), frames messages with `Content-Length` (byte-counted,
   parsed off the raw stdout stream), correlates request↔response by id, answers server→client requests
   (`workspace/configuration` → `{}`s) so it can't hang, syncs docs (`didOpen`/`didChange`, full-text),
-  caches `publishDiagnostics` by URI, and captures the server's `capabilities`.
+  caches `publishDiagnostics` by URI, and captures the server's `capabilities`. **Every `request` is
+  time-bounded** (`REQUEST_TIMEOUT_MS` = 8 s; `initialize` gets `INIT_TIMEOUT_MS` = 15 s for a slow first
+  project load) — a server that accepts a request and then goes silent (vtsls mid-index, a method it never
+  actually answers) **rejects with a timeout** instead of hanging the tool call (and the whole agent turn)
+  forever. The query path catches it and degrades to `lsp <op> failed (<id>): … timed out`; a timeout
+  during `initialize` marks the server `failed`.
 - **`manager.ts`** (`Lsp`): lazy-spawns the servers for a file's extension (root via `rootMarkers`
   walk-up), aggregates diagnostics from all (tagged by server id), and routes a query to the **first
   server that advertises the capability** (so ruff — no `definitionProvider` — is skipped for queries

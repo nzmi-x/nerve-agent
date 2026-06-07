@@ -15,6 +15,12 @@ export interface Diagnostic {
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// A request must never hang the agent turn: a server can accept a request and then go silent (vtsls
+// mid-index, a server that doesn't actually answer a method). Bound every request; `initialize` gets a
+// longer budget because a first-time project load is legitimately slower than a query.
+const REQUEST_TIMEOUT_MS = 8_000;
+const INIT_TIMEOUT_MS = 15_000;
+
 type Bytes = Uint8Array<ArrayBufferLike>;
 function concat(a: Bytes, b: Bytes): Bytes {
   const out = new Uint8Array(a.length + b.length);
@@ -123,10 +129,16 @@ export class LspClient {
     this.proc.stdin.flush();
   }
 
-  request(method: string, params: Json): Promise<unknown> {
+  request(method: string, params: Json, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
     const id = ++this.seq;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error(`${this.id} '${method}' timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => (clearTimeout(timer), resolve(v)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
   }
@@ -150,7 +162,7 @@ export class LspClient {
         },
         workspace: { workspaceFolders: true, configuration: true },
       },
-    })) as Json;
+    }, INIT_TIMEOUT_MS)) as Json;
     this.capabilities = (result?.capabilities as Json) ?? {};
     this.notify("initialized", {});
   }

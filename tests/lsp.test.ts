@@ -4,6 +4,18 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { formatResult, formatDiagnostic, loc, severityName, type LspOp } from "../src/lsp/format.ts";
 import { loadServers, findRoot } from "../src/lsp/manager.ts";
+import { LspClient } from "../src/lsp/client.ts";
+
+// --- client.ts (the request timeout — a hung server must not hang the agent turn) --------------------
+
+test("LspClient.request rejects (times out) when the server never replies", async () => {
+  // `sleep` opens stdio but never speaks LSP → the response never comes; without a timeout this hangs.
+  const c = new LspClient("sleeper", "sleep", ["10"], process.cwd());
+  const t0 = Date.now();
+  await expect(c.request("textDocument/hover", {}, 150)).rejects.toThrow(/timed out/);
+  expect(Date.now() - t0).toBeLessThan(2000);
+  await c.stop().catch(() => {});
+});
 
 // --- format.ts (pure result mappers) ----------------------------------------
 
