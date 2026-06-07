@@ -3,7 +3,6 @@
 // model · mode · cost · context · balance) plus a collapsible sidebar (session + files panels). The
 // sidebar toggles on Ctrl+B and auto-hides on narrow terminals. Affordances: @file, !shell, /command +
 // an interactive ask_user picker. See docs/manual/tui.md; OpenTUI API via manual("opentui").
-import { relative } from "node:path";
 import {
   createCliRenderer,
   BoxRenderable,
@@ -33,6 +32,7 @@ import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, 
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel } from "./format.ts";
+import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
@@ -193,14 +193,14 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const status = new TextRenderable(renderer, { id: "status", height: 1, flexShrink: 0, content: "", bg: theme.PANEL });
 
   // The responsive sidebar (populated in the sidebar block below); created here so it joins the row.
-  const sidebar = new BoxRenderable(renderer, { id: "sidebar", flexShrink: 0, width: 0, height: "100%", flexDirection: "column", paddingLeft: 1 });
+  const sidebar = createSidebar(renderer, theme); // the right-hand dashboard (./sidebar.ts); app.ts feeds it state
   mainCol.add(transcriptBox);
   mainCol.add(todoBox);
   mainCol.add(popup);
   mainCol.add(inputBox);
   mainCol.add(status);
   root.add(mainCol);
-  root.add(sidebar);
+  root.add(sidebar.box);
   renderer.root.add(root);
   input.focus();
 
@@ -238,55 +238,19 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const setTodos = (todos: Todo[]): void => {
     currentTodos = todos;
     renderTodoPanel(); // the full panel (respects todoVisible)
-    renderTodoSummary(); // just the 1-line sidebar summary — no need to rebuild every panel on a todo write
+    sidebar.renderTodoSummary(todos); // just the 1-line sidebar summary — no full rebuild on a todo write
   };
   const toggleTodos = (): void => {
     todoVisible = !todoVisible;
     renderTodoPanel();
   };
 
-  // --- responsive sidebar (D29): session + files panels; Ctrl+B toggles, narrow terminals auto-hide ---
-  const SIDEBAR_W = 34;
-  const SIDEBAR_MIN = 100; // below this terminal width the main column needs the room — sidebar hides
-  const W = SIDEBAR_W - 4; // inner text width (border + padding)
+  // --- responsive sidebar (D29): a dashboard of live panels (built in ./sidebar.ts). app.ts owns the
+  // session state and gathers it into a SidebarState per render; Ctrl+B toggles, narrow terminals auto-hide.
   let sidebarOn = true;
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
   const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
   const toolCalls: { id: string; name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
-  // The panel **title takes the border colour** (OpenTUI has no separate title colour), so each panel gets
-  // a distinct accent — both to make the titles readable (they blended into the bg) and to tell them apart.
-  const mkPanel = (id: string, title: string, color: () => string, grow = false): BoxRenderable =>
-    new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: color(), title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
-  const mkRows = (panel: BoxRenderable, n: number, prefix: string, h: number): TextRenderable[] => {
-    const rows: TextRenderable[] = [];
-    for (let i = 0; i < n; i++) {
-      const tr = new TextRenderable(renderer, { id: `${prefix}-${i}`, content: "", height: h });
-      panel.add(tr);
-      rows.push(tr);
-    }
-    return rows;
-  };
-  const sessionPanel = mkPanel("sessionPanel", " session ", () => theme.CYAN);
-  const todosPanel = mkPanel("todosPanel", " todos ", () => theme.ACCENT); // 1-line summary (full list is Ctrl+T)
-  const skillsPanel = mkPanel("skillsPanel", " skills ", () => theme.MAGENTA);
-  const lspPanel = mkPanel("lspPanel", " lsp ", () => theme.ACCENT);
-  const toolsPanel = mkPanel("toolsPanel", " tools ", () => theme.GREEN);
-  const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => theme.YELLOW);
-  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE, true);
-  for (const p of [sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) sidebar.add(p);
-  const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
-  const SKILL_ROWS = 6;
-  const LSP_ROWS = 5;
-  const TOOL_ROWS = 6;
-  const SUB_ROWS = 6;
-  const FILE_ROWS = 40;
-  const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
-  const todoSumRows = mkRows(todosPanel, 1, "todosum", 1); // single summary row
-  const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
-  const lspRows = mkRows(lspPanel, LSP_ROWS, "lsp", 0);
-  const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
-  const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
-  const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
   // The animated working indicator (spinner + label), shared by the session panel + status bar. A *moving*
   // spinner is the point: it proves the agent is alive (a frozen one means it stalled), the label flips to
   // red "stopping…" the instant ESC registers, and the whole indicator disappears when the turn ends — so
@@ -294,125 +258,27 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const activityChunk = (pad = false) =>
     fg(aborting ? theme.RED : theme.YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
-  // The 1-line todos panel (the full list is the Ctrl+T panel) — done/total + the current focus. A free
-  // function so a `todo` write can refresh just this panel (`setTodos`) without rebuilding the whole sidebar.
-  function renderTodoSummary(): void {
-    if (sidebar.width === 0) return; // hidden — skip
-    if (currentTodos.length) {
-      const done = currentTodos.filter((td) => td.status === "completed").length;
-      const inProg = currentTodos.find((td) => td.status === "in_progress");
-      const next = inProg ?? currentTodos.find((td) => td.status === "pending");
-      const icon = inProg ? fg(theme.YELLOW)("▸") : next ? fg(theme.MUTE)("○") : fg(theme.GREEN)("✓");
-      todoSumRows[0]!.content = t`${icon} ${fg(theme.MUTE)(`${done}/${currentTodos.length}`)} ${fg(theme.FG)(trunc(next ? next.content : "all done", W - 6))}`;
-    } else {
-      todoSumRows[0]!.content = t`${fg(theme.DIM)("(no todos)")}`;
-    }
-    todosPanel.height = 3; // 1 summary row + border
-  }
+  // Gather app.ts's live state into a snapshot and hand it to the sidebar module (./sidebar.ts) to paint.
   function renderSidebar(): void {
-    if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
-    // session panel: model · mode · cost · ctx · bal (the title now lives in the transcript box border).
-    sessionRows[0]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(active.id, W - 6))}`;
-    sessionRows[1]!.content = mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
-    sessionRows[2]!.content = t`${fg(theme.MUTE)("cost  ")}${fg(theme.FG)(formatCost(s.costUsd))}`;
-    sessionRows[3]!.content = t`${fg(theme.MUTE)("ctx   ")}${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}`;
-    sessionRows[4]!.content = t`${fg(theme.MUTE)("bal   ")}${fg(theme.GREEN)(formatBalance(balance))}`;
-    sessionRows[5]!.content = busy ? t`${activityChunk()}` : ""; // animated working/stopping indicator
-    sessionRows[5]!.height = busy ? 1 : 0;
-    sessionPanel.height = (busy ? 6 : 5) + 2; // grows by the streaming row + border
-    renderTodoSummary(); // the 1-line todos panel (also updated directly by setTodos, without a full rebuild)
-
-    // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
-    const skills = activeSkillNames(langTouched).slice(0, SKILL_ROWS);
-    for (let i = 0; i < skillRows.length; i++) {
-      const tr = skillRows[i]!;
-      if (i < skills.length) {
-        tr.content = t`${fg(theme.MAGENTA)("◆")} ${fg(theme.FG)(trunc(skills[i]!, W - 2))}`;
-        tr.height = 1;
-      } else {
-        tr.content = "";
-        tr.height = 0;
-      }
-    }
-    skillsPanel.height = skills.length + 2;
-
-    // lsp panel: spawn-attempted language servers + state (● running · ◌ spawning · ✗ failed/missing).
-    const lspServers = (opts.lsp?.serverStatus() ?? []).slice(0, LSP_ROWS);
-    for (let i = 0; i < lspRows.length; i++) {
-      const tr = lspRows[i]!;
-      if (i < lspServers.length) {
-        const ls = lspServers[i]!;
-        const icon = ls.state === "running" ? fg(theme.GREEN)("●") : ls.state === "spawning" ? fg(theme.YELLOW)("◌") : fg(theme.RED)("✗");
-        tr.content = t`${icon} ${fg(theme.FG)(trunc(ls.id, W - 2))}`;
-        tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
-        tr.height = 1;
-      } else {
-        tr.content = "";
-        tr.height = 0;
-      }
-    }
-    lspPanel.height = Math.max(1, lspServers.length) + 2;
-
-    // tools panel: the main agent's tool calls this session + status (● running · ✓ ok · ✗ error).
-    const toolWin = toolCalls.slice(-TOOL_ROWS);
-    for (let i = 0; i < toolRows.length; i++) {
-      const tr = toolRows[i]!;
-      if (i < toolWin.length) {
-        const tc = toolWin[i]!;
-        const icon = tc.status === "running" ? fg(theme.YELLOW)("●") : tc.status === "ok" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
-        tr.content = t`${icon} ${fg(theme.FG)(trunc(tc.name, W - 2))}`;
-        tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
-        tr.height = 1;
-      } else {
-        tr.content = "";
-        tr.height = 0;
-      }
-    }
-    toolsPanel.height = Math.max(1, toolWin.length) + 2;
-
-    // subagents panel: this session's `task` delegations + status (● running · ✓ done · ✗ failed).
-    const subWin = subagents.slice(-SUB_ROWS);
-    for (let i = 0; i < subagentRows.length; i++) {
-      const tr = subagentRows[i]!;
-      if (i < subWin.length) {
-        const sa = subWin[i]!;
-        const icon = sa.status === "running" ? fg(theme.YELLOW)("●") : sa.status === "done" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
-        tr.content = t`${icon} ${fg(theme.MUTE)(trunc(sa.prompt, W - 2))}`;
-        tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none)")}`;
-        tr.height = 1;
-      } else {
-        tr.content = "";
-        tr.height = 0;
-      }
-    }
-    subagentsPanel.height = Math.max(1, subWin.length) + 2;
-
-    // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
-    const files = [...langTouched].reverse();
-    const usedAbove = sessionPanel.height + todosPanel.height + (skills.length + 2) + lspPanel.height + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
-    const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
-    for (let i = 0; i < fileRows.length; i++) {
-      const tr = fileRows[i]!;
-      if (i < Math.min(files.length, cap)) {
-        const f = files[i]!;
-        const name = trunc(relative(cwd, f) || f, W - 2);
-        tr.content = sessionEdited.has(f) ? t`${fg(theme.YELLOW)("✎")} ${fg(theme.FG)(name)}` : t`${fg(theme.DIM)("·")} ${fg(theme.MUTE)(name)}`;
-        tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
-        tr.height = 1;
-      } else {
-        tr.content = "";
-        tr.height = 0;
-      }
-    }
+    sidebar.render({
+      model: active.id,
+      contextWindow: active.contextWindow,
+      mode,
+      balance,
+      usage: { costUsd: s.costUsd, contextTokens: s.contextTokens },
+      busy,
+      activity: busy ? t`${activityChunk()}` : "",
+      skills: activeSkillNames(langTouched),
+      lspServers: opts.lsp?.serverStatus() ?? [],
+      tools: toolCalls,
+      subagents,
+      files: [...langTouched].reverse(),
+      sessionEdited,
+      cwd,
+      todos: currentTodos,
+      termHeight: renderer.height,
+    });
   }
   // Subagent lifecycle (D6) → the subagents panel. Pushed on start, flipped on end.
   const onSubagent = (ev: SubagentEvent): void => {
@@ -425,7 +291,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
   function applySidebar(): void {
     const visible = sidebarOn && renderer.width >= SIDEBAR_MIN;
-    sidebar.width = visible ? SIDEBAR_W : 0;
+    sidebar.setVisible(visible);
     status.height = visible ? 0 : 1; // the session panel shows the same stats — only one of them at a time
     setStatus(); // refresh the bar's content + the sidebar (each no-ops when hidden)
   }
@@ -496,13 +362,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     renderer.setBackgroundColor(theme.DARKFG);
     transcriptBox.borderColor = theme.ACCENT; // titled panels keep their accent border (the title rides on it)
     inputBox.borderColor = theme.BORDER;
-    sessionPanel.borderColor = theme.CYAN;
-    todosPanel.borderColor = theme.ACCENT;
-    skillsPanel.borderColor = theme.MAGENTA;
-    lspPanel.borderColor = theme.ACCENT;
-    toolsPanel.borderColor = theme.GREEN;
-    subagentsPanel.borderColor = theme.YELLOW;
-    filesPanel.borderColor = theme.ORANGE;
+    sidebar.retheme(); // recolor the sidebar's 7 panel borders
     status.bg = theme.PANEL;
     prompt.fg = theme.ACCENT;
     input.textColor = theme.FG;
@@ -1286,7 +1146,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (key.name === "escape" && busy && turnAbort) {
       aborting = true; // flip the indicator to red "stopping…" immediately so ESC visibly registers
       turnAbort.abort();
-      if (sidebar.width > 0) sessionRows[5]!.content = t`${activityChunk()}`;
+      if (sidebar.visible) sidebar.setActivity(t`${activityChunk()}`);
       else setStatus();
     }
   });
@@ -1319,7 +1179,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       return;
     }
     spin = (spin + 1) % SPINNER.length;
-    if (sidebar.width > 0) sessionRows[5]!.content = t`${activityChunk()}`;
+    if (sidebar.visible) sidebar.setActivity(t`${activityChunk()}`);
     else setStatus();
   }, 90);
 }

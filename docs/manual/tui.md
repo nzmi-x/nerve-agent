@@ -4,7 +4,8 @@
 **responsive sidebar + affordances/status need a verify pass** (no TTY in the build env).
 **What:** the interactive terminal UI — a main column (transcript, autosuggest row, status line, input
 with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsible sidebar.
-**Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)).
+**Code:** `src/tui/app.ts` (`runTui`) + `src/tui/affordances.ts` (parsing/suggestions, [D14](../DECISIONS.md)) +
+`src/tui/sidebar.ts` (the D29 dashboard — `createSidebar`/`render(state)`) · `theme.ts` (palette) · `format.ts` (string helpers).
 
 **How it works:**
 - **Responsive row layout** ([D29](../DECISIONS.md)): the root is a flex **row** — a **`mainCol`**
