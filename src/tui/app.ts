@@ -406,8 +406,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   const toggleMode = (): void => {
     mode = mode === "plan" ? "edit" : "plan";
-    setStatus();
-    addText(`mode → ${mode.toUpperCase()}`, MUTE);
+    setStatus(); // the PLAN/EDIT badge (status bar + session panel) is the indicator — no transcript log
   };
 
   // --- actions --------------------------------------------------------------
@@ -581,8 +580,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         const m = args[0];
         if (m === "plan" || m === "edit") {
           mode = m;
-          setStatus();
-          addText(`mode → ${m.toUpperCase()}`, MUTE);
+          setStatus(); // badge is the indicator
         } else addText("usage: /mode plan|edit", MUTE);
         return;
       }
@@ -595,8 +593,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         try {
           active = selectModel(models, id);
           provider = providerFor(active);
-          setStatus();
-          addText(`model → ${active.id}`, MUTE);
+          setStatus(); // the model id (status bar + session panel) is the indicator
           void refreshBalance();
         } catch (e) {
           addText(`✗ ${e instanceof Error ? e.message : String(e)}`, RED);
@@ -775,12 +772,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
+    if (key.ctrl && key.shift && key.name === "c") return; // Ctrl+Shift+C = copy (terminal) — never our quit
     if (key.ctrl && key.name === "c") return void shutdown();
     if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
     if (key.ctrl && key.name === "b") {
       sidebarOn = !sidebarOn;
-      applySidebar();
-      addText(t`${fg(MUTE)(`sidebar ${sidebarOn ? (renderer.width >= SIDEBAR_MIN ? "shown" : "on (terminal too narrow to show)") : "hidden"}`)}`);
+      applySidebar(); // the panel appearing/disappearing is the indicator — no transcript log
       return;
     }
 
@@ -826,7 +823,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
-  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help · Ctrl+B sidebar")}`);
+  addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("· /help for commands")}`);
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   void refreshBalance();
 }

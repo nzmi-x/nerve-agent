@@ -56,7 +56,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
   and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
   **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **Ctrl+B sidebar** · **Ctrl+R reload** ·
-  ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.)
+  ESC stop · Ctrl+C quit. **Ctrl+Shift+C is left for the terminal's copy** (never our quit). (`/exit`
+  aliases `/quit`.)
+- **No redundant logs:** state changes that already have a visible indicator don't also print a transcript
+  line — mode (PLAN/EDIT badge), model (`/model`, shown in the bar/panel), and the sidebar toggle are silent.
 
 **How to change it:**
 - The parsing/suggestion/command *logic* is pure in `affordances.ts` (tested) — change behavior there;
