@@ -28,7 +28,7 @@ import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { selectModel, providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
-import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, type CommandInfo } from "./affordances.ts";
+import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
@@ -88,7 +88,7 @@ export interface TuiOptions {
   cwd: string;
   system: string;
   tools: ToolSpec[];
-  skills: CommandInfo[];
+  skills: Skill[];
   commands: Command[];
   compactionPrompt: string;
   titlePrompt: string;
@@ -694,7 +694,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         // D16: a markdown command file → expand its body and submit it as a prompt.
         const cmd = commands.find((c) => c.name === name);
         if (cmd) return void submit(expandCommand(cmd.body, args));
-        addPlain(skills.some((s) => s.name === name) ? `skill "${name}" — invocation lands in Phase 2; for now: manual("${name}")` : `unknown command: /${name} (try /help)`, () => MUTE);
+        // D12: a skill → load its SKILL.md on demand and invoke its instructions.
+        const skill = skills.find((s) => s.name === name);
+        if (skill) return void invokeSkill(skill, args);
+        addPlain(`unknown command: /${name} (try /help)`, () => MUTE);
       }
     }
   }
@@ -706,18 +709,36 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (!text || busy) return;
     if (text.startsWith("!")) return void runShell(text.slice(1));
     if (text.startsWith("/")) return void runCommand(text);
+    await sendPrompt(text, () => t`${bold(fg(GREEN)("❯"))} ${text}`);
+  }
 
+  // Send a prompt to the agent: echo a transcript line, persist the (possibly longer) model text, run a turn.
+  async function sendPrompt(modelText: string, echo: () => Content): Promise<void> {
+    if (busy) return;
     busy = true;
     setStatus();
     spacer();
-    addText(() => t`${bold(fg(GREEN)("❯"))} ${text}`);
-    session.addUser(text);
+    addText(echo);
+    session.addUser(modelText);
     await runAgentTurn();
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     input.focus();
+  }
+
+  // D12: invoke a skill — load its SKILL.md body lazily (progressive disclosure), expand args like a
+  // command, and run it. The model gets the full instructions; the transcript shows a compact `/<skill>`.
+  async function invokeSkill(skill: Skill, args: string[]): Promise<void> {
+    let body: string;
+    try {
+      body = await loadSkillBody(skill.path);
+    } catch (e) {
+      return void addPlain(`✗ couldn't load skill "${skill.name}": ${e instanceof Error ? e.message : String(e)}`, () => RED);
+    }
+    if (!body) return void addPlain(`✗ skill "${skill.name}" is empty`, () => RED);
+    await sendPrompt(expandCommand(body, args), () => t`${bold(fg(GREEN)("❯"))} ${fg(MUTE)(`/${skill.name}`)} ${fg(DIM)("(skill)")}`);
   }
 
   // One agent turn: stream → tools → post-edit hooks → (D24) hand failing checks back so the agent

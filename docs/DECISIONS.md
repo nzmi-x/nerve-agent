@@ -264,8 +264,11 @@ why [the operating guide moved to `.claude/CLAUDE.md`](#) and nerve dogfoods its
 if a real need appears. No marketplace, no remote fetch, no auto-install.
 **Rejected.** A bespoke nerve-only prompt/skill format (throws away the user's existing ecosystem);
 loading every CLAUDE.md up the whole tree eagerly (load project + user; nested/subdir on demand later).
-**Phase.** `CLAUDE.md` layering is cheap and lands with the **Phase 1** system-prompt assembly;
-**skills** discovery + invocation is **Phase 2** (alongside LSP). Keep the loader a pure function of
+**Phase.** `CLAUDE.md` layering is cheap and lands with the **Phase 1** system-prompt assembly; skill
+**discovery + listing** lands Phase 1.5; skill **invocation is built** (Phase 1.5): `/<skill> [args]`
+loads the SKILL.md body lazily (progressive disclosure — `loadSkillBody`), expands args like a command
+([D16](#d16--markdown-slash-commands-claude-compatible)), and runs it as a turn (a compact `/<skill>` echo, not the whole body). The model also gets
+relevant skills **automatically** via the language packs ([D24](#d24--language-packs-conditional-skills--native-post-edit-hooks)). Keep the loader a pure function of
 the filesystem so it hot-swaps with `/reload` like the other seams ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
 
 ## D13 — Self-documentation: a `manual` tool over `docs/manual/` (the operator's manual)
@@ -320,8 +323,8 @@ popup rendering + key handling live in `app.ts`.
 can't runtime-test small. Reference-only `@` and private `!` are the lean, least-surprising defaults.
 **Rejected.** `@` inline-expansion (up-front tokens; `read` covers it); `!` respecting the mode gate
 (the gate is for the model, not the human); eager skill loading.
-**Phase.** Affordance logic + `/drop` + built-in commands: **Phase 1**. Skill invocation, and richer
-suggestions: Phase 2. Interactive rendering needs a real-terminal verification pass.
+**Phase.** Affordance logic + `/drop` + built-in commands: **Phase 1**. Skill invocation: **built**
+(Phase 1.5, [D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude)). Richer suggestions: later. Interactive rendering needs a real-terminal verification pass.
 
 ---
 

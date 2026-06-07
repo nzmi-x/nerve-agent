@@ -38,11 +38,12 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
-- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /reload /sessions /resume [id] /drop /balance /quit` + skill listing
+- **Commands:** `/help /model [id] /mode plan|edit /clear /compact [focus] /reload /sessions /resume [id] /drop /balance /quit`
   + **markdown command files** ([D16](../DECISIONS.md), `src/commands.ts`): a `/<name>` matching a
   `<name>.md` under any `commandRoots` dir (`~/.nerve/projects/<slug>/commands` · `./.claude/commands` ·
   `~/.nerve/commands` · `~/.claude/commands`, D22) expands its body (`$1`/`$@`/`$ARGUMENTS` substitution)
-  and submits it as a prompt. A built-in name always wins.
+  and submits it as a prompt + **skills** ([D12](../DECISIONS.md), `skills.md`): `/<skill> [args]` loads
+  that skill's `SKILL.md` on demand and runs it. Precedence on a name clash: built-in > command > skill.
 - **`ask_user`:** the loop's `ctx.ask` opens an interactive picker (↑/↓ + Enter) in the popup and
   blocks the turn until you choose; the recommended option is preselected.
 - **Sessions:** `/resume [id]` closes the current session and reloads an existing one (default = most

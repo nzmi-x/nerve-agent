@@ -1,16 +1,24 @@
 # skills
 
-**Status:** discovery/listing built (Phase 1.5); invocation lands in Phase 2.
-**What:** Claude-compatible skills — discover capabilities from the `skillRoots` and inject one on demand.
-**Code:** `src/paths.ts` (`skillRoots`) + `src/tui/affordances.ts` (`discoverSkills`, frontmatter parse).
+**Status:** discovery + listing + **invocation** built (Phase 1.5).
+**What:** Claude-compatible skills — discover capabilities from the `skillRoots`, list them in the `/`
+popup, and invoke one on demand (load its `SKILL.md` for that turn).
+**Code:** `src/paths.ts` (`skillRoots`) + `src/tui/affordances.ts` (`discoverSkills`/`loadSkillBody`).
+Invocation is wired in `src/tui/app.ts` (`invokeSkill`). Tests: `tests/affordances.test.ts`.
 
 **How it works:**
 - A skill is a folder with a `SKILL.md` whose YAML frontmatter has `name` + `description`.
 - On startup nerve discovers skills from the `skillRoots` ([D22](../DECISIONS.md), most-specific first,
   dedup first-wins): `~/.nerve/projects/<slug>/skills` → `./.claude/skills` → `~/.nerve/skills` →
-  `~/.claude/skills`. Only each skill's **name + description** sit in context (progressive disclosure).
-- **Invoking** a skill injects the full `SKILL.md` body (and referenced files) for that turn (Phase 2).
-- Discovery is a **pure function of the filesystem**.
+  `~/.claude/skills`. Only each skill's **name + description** (and the `SKILL.md` path) sit in context —
+  the body isn't read until invoked (**progressive disclosure**).
+- **Invoking** `/<skill> [args]` ([D12](../DECISIONS.md)): `loadSkillBody` reads the `SKILL.md`,
+  strips frontmatter, `expandCommand` substitutes args (like a slash command, [D16](../DECISIONS.md)),
+  and it runs as a turn — the model gets the full instructions; the transcript shows a compact
+  `❯ /<skill> (skill)`, not the whole body. Built-in commands and file commands win on a name clash.
+- Relevant skills are *also* injected **automatically** by the language packs ([D24](../DECISIONS.md))
+  when their language is in play — `/<skill>` is the manual escape hatch.
+- Discovery + body-load are **pure functions of the filesystem**.
 
 **How to change it:**
 - Add/remove a discovery root → edit `skillRoots` in `src/paths.ts`.
@@ -21,9 +29,10 @@
   `~/.nerve/skills` for global, or `~/.nerve/projects/<slug>/skills` for this project).
 
 **Gotchas:**
-- The bundled `opentui` skill is **not** loaded as a user-skill — it's reached through the `manual`
-  tool on demand (see [tui](tui.md) / `manual("opentui")`), so it never costs context until the UI
-  is touched.
-- Keep `src/context.ts` re-import-safe (no top-level side effects) so `/reload` works.
+- The bundled `opentui` skill *is* discoverable (it lives in `./.claude/skills/opentui`), but its
+  full reference is reached through the `manual` tool (`manual("opentui")`), so it doesn't cost context
+  until the UI is touched.
+- A skill body is submitted as a **user turn** (persisted to the session) — invoking a long skill adds
+  that text to context. Built-in/file commands shadow a skill of the same name.
 
 **See:** [DECISIONS D12](../DECISIONS.md) · [ARCHITECTURE_BRIEF §7](../ARCHITECTURE_BRIEF.md)

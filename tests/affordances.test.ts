@@ -9,6 +9,7 @@ import {
   parseSlash,
   applyAtSuggestion,
   discoverSkills,
+  loadSkillBody,
 } from "../src/tui/affordances.ts";
 
 // --- parseAffordance --------------------------------------------------------
@@ -67,9 +68,18 @@ test("applyAtSuggestion: replaces the active @token", () => {
 
 // --- discoverSkills (against the repo's real .claude/skills) -----------------
 
-test("discoverSkills: reads SKILL.md frontmatter (finds the bundled opentui skill)", async () => {
+test("discoverSkills: reads SKILL.md frontmatter + captures the path for lazy invocation (D12)", async () => {
   const skills = await discoverSkills([resolve(".claude/skills")]);
   const opentui = skills.find((s) => s.name === "opentui");
   expect(opentui).toBeDefined();
   expect(opentui!.description.length).toBeGreaterThan(0);
+  expect(opentui!.path).toContain(join("opentui", "SKILL.md"));
+});
+
+test("loadSkillBody: strips frontmatter, returns the skill instructions (D12)", async () => {
+  const skills = await discoverSkills([resolve(".claude/skills")]);
+  const opentui = skills.find((s) => s.name === "opentui")!;
+  const body = await loadSkillBody(opentui.path);
+  expect(body.length).toBeGreaterThan(0);
+  expect(body.startsWith("---")).toBe(false); // YAML frontmatter removed
 });

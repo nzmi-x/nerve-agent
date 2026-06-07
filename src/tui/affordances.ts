@@ -16,6 +16,11 @@ export interface CommandInfo {
   description: string;
 }
 
+/** A discovered skill — name+description for the `/` popup, plus the SKILL.md path loaded lazily (D12). */
+export interface Skill extends CommandInfo {
+  path: string;
+}
+
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
   { name: "model", description: "Switch model — /model <id>" },
@@ -82,9 +87,9 @@ export function applyAtSuggestion(value: string, suggestion: string): string {
   return at < 0 ? value : value.slice(0, at + 1) + suggestion;
 }
 
-/** Discover skills (name + description from SKILL.md frontmatter) under the given roots. Partial D12. */
-export async function discoverSkills(roots: readonly string[]): Promise<CommandInfo[]> {
-  const out: CommandInfo[] = [];
+/** Discover skills (name + description from SKILL.md frontmatter; path for lazy load) under the roots (D12). */
+export async function discoverSkills(roots: readonly string[]): Promise<Skill[]> {
+  const out: Skill[] = [];
   const seen = new Set<string>();
   for (const root of roots) {
     let dirs: Dirent[];
@@ -95,14 +100,21 @@ export async function discoverSkills(roots: readonly string[]): Promise<CommandI
     }
     for (const d of dirs) {
       if (!d.isDirectory() || seen.has(d.name)) continue;
-      const f = Bun.file(join(root, d.name, "SKILL.md"));
+      const path = join(root, d.name, "SKILL.md");
+      const f = Bun.file(path);
       if (!(await f.exists())) continue;
       const fm = parseFrontmatter(await f.text());
       seen.add(d.name);
-      out.push({ name: fm.name ?? d.name, description: fm.description ?? "" });
+      out.push({ name: fm.name ?? d.name, description: fm.description ?? "", path });
     }
   }
   return out;
+}
+
+/** Load a skill's instructions — its SKILL.md body, frontmatter stripped (read on invocation, D12). */
+export async function loadSkillBody(path: string): Promise<string> {
+  const md = await Bun.file(path).text();
+  return md.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
 
 function parseFrontmatter(md: string): { name?: string; description?: string } {
