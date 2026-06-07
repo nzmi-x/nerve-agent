@@ -9,8 +9,8 @@ import {
   BoxRenderable,
   TextRenderable,
   ScrollBoxRenderable,
-  InputRenderable,
-  InputRenderableEvents,
+  TextareaRenderable,
+  defaultTextareaKeyBindings,
   MarkdownRenderable,
   SyntaxStyle,
   RGBA,
@@ -76,7 +76,7 @@ type Content = string | ReturnType<typeof t>;
 const HELP = [
   "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · PgUp/PgDn scroll · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
+  "keys      Enter send · Alt+Enter newline · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · PgUp/PgDn scroll · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
   "copy      selection, Ctrl+Shift+C/V, right-click are your terminal's now (nerve no longer grabs the mouse/keyboard)",
 ].join("\n");
 
@@ -179,7 +179,57 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     paddingRight: 1,
   });
   const prompt = new TextRenderable(renderer, { id: "prompt", content: "❯ ", fg: ACCENT, attributes: TextAttributes.BOLD });
-  const input = new InputRenderable(renderer, { id: "input", flexGrow: 1, placeholder: "Message · @file · !shell · /command", textColor: FG, cursorColor: ACCENT });
+  // Multi-line message box (#3): a Textarea (Enter sends, Alt+Enter inserts a newline — Shift+Enter needs
+  // the Kitty protocol we turned off), growing 1→8 rows with content. No `value` accessor like the old
+  // Input — read with `.plainText`, replace with `.setText`. Autosuggest + submit are wired via the
+  // onContentChange / onSubmit callbacks (so the old input.on INPUT/ENTER handlers are gone).
+  const input = new TextareaRenderable(renderer, {
+    id: "input",
+    flexGrow: 1,
+    minHeight: 1,
+    maxHeight: 8,
+    wrapMode: "word",
+    placeholder: "Message · @file · !shell · /command · Alt+Enter newline",
+    textColor: FG,
+    cursorColor: ACCENT,
+    keyBindings: [
+      ...defaultTextareaKeyBindings.filter((b) => b.action !== "newline" || b.ctrl || b.shift || b.meta), // drop default Enter→newline
+      { name: "return", action: "submit" }, // Enter sends
+      { name: "return", meta: true, action: "newline" }, // Alt+Enter inserts a newline
+    ],
+    onContentChange: () => {
+      if (echoGuard !== null && input.plainText === echoGuard) {
+        echoGuard = null;
+        return;
+      }
+      echoGuard = null;
+      void updateSuggestions(input.plainText);
+    },
+    onSubmit: () => {
+      if (asking) {
+        const a = asking;
+        asking = null;
+        setPopup([]);
+        a.resolve(a.req.options[a.sel]!.label);
+        return;
+      }
+      if (suggestOpen()) {
+        const it = suggest.items[suggest.sel];
+        if (it && suggest.kind === "slash") return void submit(`/${it.insert}`);
+        if (it && suggest.kind === "at") {
+          const next = applyAtSuggestion(input.plainText, it.insert);
+          if (it.insert.endsWith("/")) {
+            echoGuard = next;
+            input.setText(next);
+            void updateSuggestions(next);
+            return;
+          }
+          return void submit(next);
+        }
+      }
+      void submit(input.plainText);
+    },
+  });
   inputBox.add(prompt);
   inputBox.add(input);
 
@@ -545,9 +595,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   function acceptSuggestion(): void {
     const it = suggest.items[suggest.sel];
     if (!it) return;
-    const next = suggest.kind === "at" ? applyAtSuggestion(input.value, it.insert) : `/${it.insert} `;
+    const next = suggest.kind === "at" ? applyAtSuggestion(input.plainText, it.insert) : `/${it.insert} `;
     echoGuard = next;
-    input.value = next;
+    input.setText(next);
     clearSuggest();
   }
 
@@ -792,7 +842,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   async function submit(value: string): Promise<void> {
     const raw = value.trim();
-    input.value = "";
+    input.setText("");
     clearSuggest();
     if (!raw || busy) return void (pastes.length = 0);
     const expanded = expandPastes(raw, pastes); // restore any "[Pasted N lines]" tokens (also clears the stash)
@@ -942,35 +992,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   }
 
   // --- events ---------------------------------------------------------------
-  input.on(InputRenderableEvents.INPUT, (value: string) => {
-    if (echoGuard !== null && value === echoGuard) {
-      echoGuard = null;
-      return;
-    }
-    echoGuard = null;
-    void updateSuggestions(value);
-  });
-  input.on(InputRenderableEvents.ENTER, (value: string) => {
-    if (asking) return;
-    if (suggestOpen()) {
-      const it = suggest.items[suggest.sel];
-      // Slash popup → run the highlighted command (no Tab needed). e.g. `/ex`↵ → /exit.
-      if (it && suggest.kind === "slash") return void submit(`/${it.insert}`);
-      // @-popup → accept the highlighted path. A directory drills in (don't send); a file sends.
-      if (it && suggest.kind === "at") {
-        const next = applyAtSuggestion(input.value, it.insert);
-        if (it.insert.endsWith("/")) {
-          echoGuard = next;
-          input.value = next;
-          void updateSuggestions(next);
-          return;
-        }
-        return void submit(next);
-      }
-    }
-    void submit(value);
-  });
-
+  // (Autosuggest + submit are wired via the Textarea's onContentChange / onSubmit, set at construction.)
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (key.ctrl && key.name === "c") return void shutdown(); // Ctrl+Shift+C is now the terminal's copy (Kitty off)
     // Keyboard scroll for the transcript (mouse capture is off → no wheel): PgUp/PgDn by ~a page.
@@ -990,12 +1012,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       } else if (key.name === "down") {
         asking.sel = Math.min(asking.req.options.length - 1, asking.sel + 1);
         renderAsk();
-      } else if (key.name === "return") {
-        const a = asking;
-        asking = null;
-        setPopup([]);
-        a.resolve(a.req.options[a.sel]!.label);
       }
+      // Enter (return) is handled by the Textarea's onSubmit, which resolves the picker.
       return;
     }
 
@@ -1032,7 +1050,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (!p) return; // short single-line paste → let the input insert it normally
     ev.preventDefault();
     pastes.push(text);
-    input.value = `${input.value}${p.token}`; // fires INPUT → suggestions refresh
+    input.setText(`${input.plainText}${p.token}`); // fires onContentChange → suggestions refresh
   });
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
