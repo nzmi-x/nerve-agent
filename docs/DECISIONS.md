@@ -718,7 +718,9 @@ darkened to the libadwaita ramp so coloured text + the inverted EDIT/PLAN badges
 `$NERVE_THEME=light|dark` forces one; off-GNOME falls back to dark.
 - **Live-following (zero loss).** `app.ts` runs `gsettings monitor …color-scheme` (a subprocess, killed on
   exit like the LSP servers) and **re-themes in place** when the system flips — no relaunch. The palette is
-  `let` (reassigned via `pickTheme()`), the markdown `SyntaxStyle` is rebuilt, chrome props (`borderColor`/
+  one mutable `theme` object (`Object.assign(theme, pickTheme())` in place — so every reader, app.ts and the
+  extracted panel modules alike, sees the new colours), the markdown `SyntaxStyle` is rebuilt via
+  `buildSyntaxStyle(theme)` (theme.ts owns the colour→style map), chrome props (`borderColor`/
   `bg`/`fg`/`textColor`) are reassigned, and **every transcript line re-renders itself**: each line keeps a
   re-runnable thunk — `text` lines rebuild their `t`…`` content (re-reading the palette), `plain`/streaming
   lines (incl. the accumulating reasoning line) recolour `fg`, `md` blocks swap `syntaxStyle`. So **nothing

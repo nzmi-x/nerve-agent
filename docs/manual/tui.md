@@ -12,7 +12,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Theme** ([D30](../DECISIONS.md)): the palette comes from `src/tui/theme.ts` (`pickTheme()`), inheriting
   ghostty's Adwaita / Adwaita Dark by reading the GNOME `color-scheme` (`gsettings`) — `$NERVE_THEME=light|dark`
   forces it. It **live-follows** the system: a `gsettings monitor` subprocess re-themes the UI **in place**
-  on a dark/light flip (palette reassigned, `SyntaxStyle` rebuilt, chrome recoloured, and every transcript
+  on a dark/light flip (palette updated in place, `SyntaxStyle` rebuilt, chrome recoloured, and every transcript
   line re-rendered from a stored thunk → zero loss). A flip mid-stream is deferred to turn end.
 - Main column: a **bordered transcript** `Box` (rounded, title " ◆ &lt;title&gt; ") wrapping a `ScrollBox`
   (`stickyScroll: bottom`) · a **todo panel** ([D25](../DECISIONS.md): pinned, colored `☑ todos`, updated
