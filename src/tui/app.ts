@@ -100,6 +100,7 @@ export interface TuiOptions {
   skills: CommandInfo[];
   commands: Command[];
   compactionPrompt: string;
+  titlePrompt: string;
   lsp?: Lsp;
 }
 
@@ -118,7 +119,7 @@ interface PopupRow {
 export async function runTui(opts: TuiOptions): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30 });
   renderer.setBackgroundColor(DARKFG);
-  const { models, cwd, system, skills, commands, compactionPrompt } = opts;
+  const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
   const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
   // Hot-swappable leaf seams (D7): tool specs + interceptor factories. /reload re-imports them.
   let tools = opts.tools;
@@ -414,6 +415,26 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     else addText(`✗ reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`, RED);
   }
 
+  // D26: auto-title the session from its first exchange (best-effort, async, non-blocking). The title
+  // shows in the transcript header + the /sessions list and persists for resume.
+  let titling = false;
+  async function titleSession(): Promise<void> {
+    if (titling || session.title || session.messages.length < 2) return;
+    titling = true;
+    try {
+      const raw = await summarize(provider, active.id, session.messages.slice(0, 4), titlePrompt, "", new AbortController().signal);
+      const title = (raw.split("\n").map((l) => l.trim()).find(Boolean) ?? "").replace(/^[#*"'`\s]+/, "").replace(/["'`.\s]+$/, "").slice(0, 48);
+      if (title) {
+        session.setTitle(title);
+        transcriptBox.title = ` ◆ ${title} `;
+      }
+    } catch {
+      /* title is best-effort */
+    } finally {
+      titling = false;
+    }
+  }
+
   async function drop(): Promise<void> {
     const old = session.id;
     await session.close();
@@ -426,6 +447,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     meter = new UsageMeter();
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
+    transcriptBox.title = " ◆ nerve ";
     addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`dropped ${old} · new session ${session.id}`)}`);
     setStatus();
   }
@@ -441,7 +463,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     meter = new UsageMeter();
     clearTranscript();
     renderHistory(session.messages);
-    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id} · ${session.messages.length} message(s) in context`)}`);
+    transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
+    addText(t`${fg(MAGENTA)("✦")} ${fg(MUTE)(`resumed ${id}${session.title ? ` · ${session.title}` : ""} · ${session.messages.length} message(s) in context`)}`);
     setStatus();
   }
 
@@ -465,7 +488,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     addText(t`${fg(ACCENT)("sessions")}  ${fg(DIM)("/resume <id> · /sessions delete <id>")}`);
     for (const s of list) {
       const cur = s.id === session.id;
-      addText(t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(DIM)(trunc(s.preview, Math.max(16, renderer.width - 52)))}`);
+      const label = s.title || s.preview;
+      addText(t`${cur ? fg(GREEN)("●") : fg(DIM)("·")} ${fg(cur ? GREEN : FG)(s.id)}  ${fg(MUTE)(`${s.msgs}msg`)}  ${fg(DIM)(rel(s.mtimeMs))}  ${fg(s.title ? CYAN : DIM)(trunc(label, Math.max(16, renderer.width - 52)))}`);
     }
   }
 
@@ -544,6 +568,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     addText(t`${bold(fg(GREEN)("❯"))} ${text}`);
     session.addUser(text);
     await runAgentTurn();
+    void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
     input.focus();
@@ -726,6 +751,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (key.name === "escape") turnAbort?.abort();
   });
 
+  if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
   addText(t`${fg(ACCENT)("✦")} ${fg(MUTE)("welcome to nerve")} ${fg(DIM)("— type a message · @file · !shell · /command · /help")}`);
   setStatus();
   void refreshBalance();

@@ -609,6 +609,26 @@ subsystem (the always-visible panel + the in-context result suffice). `activeFor
 labels (kept to `content` + `status` for now).
 **Phase.** Built now (Phase 1.5).
 
+## D26 — Session titles, auto-generated from the first exchange
+**Decision.** Each session gets a short **title**. After the first assistant turn, nerve fires a cheap
+**one-shot** (`summarize()` + `prompts/title.md`) to name it — **async/non-blocking** (the answer isn't
+delayed). Persisted as a `{"t":"title"}` line (latest wins on resume). Shown in the **transcript header**
+(`◆ <title>`), the **`/sessions`** list (cyan), and restored on resume. Best-effort — errors ignored.
+**Why.** The user wanted the session "titled by the agent on the first response." Auto-generating from
+the first exchange is more reliable than the alternatives and reads the actual content; it also makes
+the `/sessions` list and resume far more legible.
+**Rejected.** A `title` tool the agent must call on turn 1 (forces a tool round-trip → latency every
+session start); parsing a marker out of the *streamed* first response (fragile stream-stripping).
+**Phase.** Built (TUI). Headless doesn't auto-title yet; the persisted title still benefits `/sessions`.
+
+## D27 — Lazy session file (no empty transcripts)
+**Decision.** A session's JSONL is created on the **first write**, not at construction — so opening the
+TUI and not sending anything leaves **no empty file**. The sink opens lazily in `writeLine`; `close()`
+is a no-op when nothing was written.
+**Why.** The user noticed every TUI launch littered an empty `<id>.jsonl`. Working state shouldn't
+touch disk until there's something to persist.
+**Phase.** Built.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

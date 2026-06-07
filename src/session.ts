@@ -24,7 +24,10 @@ interface ToolCallBuf {
 export class Session {
   readonly id: string;
   readonly messages: Message[] = [];
-  private readonly sink: WriteStream;
+  title = ""; // a short agent-generated label, set once at the start of the session (D26)
+  private readonly dir: string;
+  private readonly path: string;
+  private sink: WriteStream | null = null; // opened lazily on the first write — no empty files (D27)
 
   // Count of canonical `msg` lines ever written — the global ordinal compaction anchors against (D17).
   // A compacted summary is NOT a msg line, so it doesn't advance this; kept messages keep their ordinals.
@@ -37,18 +40,23 @@ export class Session {
 
   constructor(init: SessionInit = {}) {
     this.id = init.id ?? new Date().toISOString().replace(/[:.]/g, "-");
-    const dir = init.dir ?? sessionsDir(); // ~/.nerve/projects/<slug>/sessions (D22)
-    mkdirSync(dir, { recursive: true });
-    const path = join(dir, `${this.id}.jsonl`);
-    if (init.resume && existsSync(path)) {
-      const loaded = loadSession(path);
+    this.dir = init.dir ?? sessionsDir(); // ~/.nerve/projects/<slug>/sessions (D22)
+    this.path = join(this.dir, `${this.id}.jsonl`);
+    if (init.resume && existsSync(this.path)) {
+      const loaded = loadSession(this.path);
       this.messages.push(...loaded.messages);
       this.totalMsgs = loaded.total;
+      this.title = loaded.title;
     }
-    this.sink = createWriteStream(path, { flags: "a" });
+    // The file isn't created here — only on the first writeLine (D27), so opening the TUI without
+    // sending anything leaves no empty transcript behind.
   }
 
   private writeLine(obj: unknown): void {
+    if (!this.sink) {
+      mkdirSync(this.dir, { recursive: true });
+      this.sink = createWriteStream(this.path, { flags: "a" });
+    }
     this.sink.write(JSON.stringify(obj) + "\n");
   }
 
@@ -138,9 +146,17 @@ export class Session {
     this.writeLine({ t: "compaction", summary, firstKept });
   }
 
-  /** Flush and close the JSONL sink. */
+  /** Set the session's short title (D26) — persisted as a `{"t":"title"}` line; latest wins on resume. */
+  setTitle(title: string): void {
+    this.title = title;
+    this.writeLine({ t: "title", title });
+  }
+
+  /** Flush and close the JSONL sink (a no-op if nothing was ever written). */
   close(): Promise<void> {
-    return new Promise((resolve) => this.sink.end(resolve));
+    const sink = this.sink;
+    if (!sink) return Promise.resolve();
+    return new Promise((resolve) => sink.end(resolve));
   }
 }
 
@@ -150,10 +166,11 @@ export class Session {
  * history — the LATEST one wins: `messages = [summary, …allMsgs.slice(firstKept)]`. `total` always
  * counts every `msg` line so the next compaction's ordinals line up.
  */
-export function loadSession(path: string): { messages: Message[]; total: number } {
-  if (!existsSync(path)) return { messages: [], total: 0 };
+export function loadSession(path: string): { messages: Message[]; total: number; title: string } {
+  if (!existsSync(path)) return { messages: [], total: 0, title: "" };
   const all: Message[] = [];
   let latest: { summary: string; firstKept: number } | null = null;
+  let title = "";
   for (const line of readFileSync(path, "utf8").split("\n")) {
     if (!line) continue;
     try {
@@ -163,14 +180,16 @@ export function loadSession(path: string): { messages: Message[]; total: number 
         all.push(msg as unknown as Message);
       } else if (o.t === "compaction") {
         latest = { summary: String(o.summary ?? ""), firstKept: Number(o.firstKept ?? 0) };
+      } else if (o.t === "title") {
+        title = String(o.title ?? "");
       }
     } catch {
       // skip a malformed line rather than fail the whole resume
     }
   }
   const total = all.length;
-  if (!latest) return { messages: all, total };
-  return { messages: [summaryMessage(latest.summary), ...all.slice(latest.firstKept)], total };
+  const messages = latest ? [summaryMessage(latest.summary), ...all.slice(latest.firstKept)] : all;
+  return { messages, total, title };
 }
 
 /** Back-compat: just the rebuilt message list (see {@link loadSession}). */

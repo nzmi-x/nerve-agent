@@ -10,6 +10,7 @@ export interface SessionInfo {
   size: number;
   msgs: number; // count of canonical `msg` lines
   preview: string; // first user message, whitespace-collapsed
+  title: string; // agent-generated session title (D26), or "" if none
 }
 
 /** Full listing (reads each file) — newest first. For the interactive `/sessions` command. */
@@ -22,10 +23,12 @@ export function listSessions(dir: string = sessionsDir()): SessionInfo[] {
     const st = statSync(path);
     let msgs = 0;
     let preview = "";
+    let title = "";
     try {
       for (const line of readFileSync(path, "utf8").split("\n")) {
         if (!line) continue;
-        const o = JSON.parse(line) as { t?: string; role?: string; content?: unknown };
+        const o = JSON.parse(line) as { t?: string; role?: string; content?: unknown; title?: unknown };
+        if (o.t === "title") title = typeof o.title === "string" ? o.title : title;
         if (o.t !== "msg") continue;
         msgs++;
         if (!preview && o.role === "user" && typeof o.content === "string") preview = o.content.replace(/\s+/g, " ").trim();
@@ -33,7 +36,7 @@ export function listSessions(dir: string = sessionsDir()): SessionInfo[] {
     } catch {
       // a half-written tail shouldn't hide the session
     }
-    out.push({ id: f.replace(/\.jsonl$/, ""), mtimeMs: st.mtimeMs, size: st.size, msgs, preview });
+    out.push({ id: f.replace(/\.jsonl$/, ""), mtimeMs: st.mtimeMs, size: st.size, msgs, preview, title });
   }
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }

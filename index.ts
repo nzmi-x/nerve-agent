@@ -41,6 +41,11 @@ function compactionPrompt(): string {
   return existsSync(p) ? readFileSync(p, "utf8") : "Summarize the conversation so it can continue in less context.";
 }
 
+function titlePrompt(): string {
+  const p = resolve(import.meta.dir, "prompts/title.md");
+  return existsSync(p) ? readFileSync(p, "utf8") : "Give a concise 3-6 word Title Case title for this conversation. Output only the title.";
+}
+
 // Is an external command available? Absolute paths (e.g. $SHELL=/usr/bin/zsh) are checked directly.
 function onPath(cmd: string): boolean {
   return cmd.includes("/") ? existsSync(cmd) : Bun.which(cmd) !== null;
@@ -173,7 +178,7 @@ if (prompt) {
   const cwd = process.cwd();
   const skills = await discoverSkills(skillRoots(cwd));
   const commands = await discoverCommands(commandRoots(cwd));
-  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt(), lsp });
+  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt(), titlePrompt: titlePrompt(), lsp });
 } else {
   // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);

@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Session } from "../src/session.ts";
@@ -76,4 +76,23 @@ test("resume reloads prior messages from the msg lines", async () => {
     ["assistant", "reply"],
   ]);
   await b.close();
+});
+
+test("title (D26): setTitle persists; resume restores it", async () => {
+  const a = new Session({ id: "tt", dir });
+  a.addUser("hi");
+  a.setTitle("My Cool Session");
+  await a.close();
+
+  const b = new Session({ id: "tt", dir, resume: true });
+  expect(b.title).toBe("My Cool Session");
+  await b.close();
+});
+
+test("lazy file (D27): no jsonl until the first write", async () => {
+  const s = new Session({ id: "lazy", dir });
+  expect(existsSync(join(dir, "lazy.jsonl"))).toBe(false); // opened the session but wrote nothing
+  s.addUser("now");
+  await s.close();
+  expect(existsSync(join(dir, "lazy.jsonl"))).toBe(true);
 });
