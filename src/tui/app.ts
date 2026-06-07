@@ -966,6 +966,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer(); // breathing room before the assistant's answer
     session.addUser(modelText);
     await runAgentTurn();
+    // If the model ended the turn with todos unfinished, say so. Small/fast models lose the thread on long
+    // sequential tasks and stop early; the loop is correct (it ran until the model stopped calling tools),
+    // but an idle UI with work left otherwise reads as "done". Skip on ESC — that abort was intentional.
+    if (!turnAbort?.signal.aborted) {
+      const pending = currentTodos.filter((td) => td.status !== "completed").length;
+      if (pending) sysInfo(`turn ended · ${pending} todo${pending === 1 ? "" : "s"} still pending — send a message to continue`);
+    }
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
