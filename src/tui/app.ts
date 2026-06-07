@@ -76,7 +76,8 @@ type Content = string | ReturnType<typeof t>;
 const HELP = [
   "commands  /help · /model [id] · /mode plan|edit · /clear · /compact · /reload · /sessions · /resume [id] · /drop · /balance · /quit",
   "input     @path file ref · !cmd run shell directly · /cmd command",
-  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
+  "keys      Enter send · Tab accept / toggle mode · ↑/↓ navigate · Shift+Tab mode · PgUp/PgDn scroll · Ctrl+B sidebar · Ctrl+R reload · ESC stop · Ctrl+C quit",
+  "copy      selection, Ctrl+Shift+C/V, right-click are your terminal's now (nerve no longer grabs the mouse/keyboard)",
 ].join("\n");
 
 export interface TuiOptions {
@@ -108,7 +109,11 @@ interface PopupRow {
 }
 
 export async function runTui(opts: TuiOptions): Promise<void> {
-  const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30 });
+  // Hand the mouse + keyboard back to the terminal: no mouse capture (native selection + right-click
+  // menu) and no Kitty keyboard protocol (so the terminal's own Ctrl+Shift+C/V copy-paste keep working
+  // instead of being grabbed by the app). Trade-off: Shift+Enter isn't distinguishable from Enter without
+  // Kitty, so the multi-line newline is Alt+Enter; and transcript scroll is by keyboard (PgUp/PgDn).
+  const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30, useMouse: false, useKittyKeyboard: null });
   renderer.setBackgroundColor(DARKFG);
   const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
   const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
@@ -963,8 +968,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   });
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
-    if (key.ctrl && key.shift && key.name === "c") return; // Ctrl+Shift+C = copy (terminal) — never our quit
-    if (key.ctrl && key.name === "c") return void shutdown();
+    if (key.ctrl && key.name === "c") return void shutdown(); // Ctrl+Shift+C is now the terminal's copy (Kitty off)
+    // Keyboard scroll for the transcript (mouse capture is off → no wheel): PgUp/PgDn by ~a page.
+    if (key.name === "pageup") return void transcript.scrollBy(-(Math.max(3, transcriptBox.height - 4)));
+    if (key.name === "pagedown") return void transcript.scrollBy(Math.max(3, transcriptBox.height - 4));
     if (key.ctrl && key.name === "r") return void reload(); // D7 hot-swap
     if (key.ctrl && key.name === "b") {
       sidebarOn = !sidebarOn;

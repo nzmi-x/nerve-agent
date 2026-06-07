@@ -62,9 +62,12 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
 - **Keys:** Enter with a popup open **accepts the highlighted suggestion** before acting — a `/`
   command runs (`/ex`↵ → `/exit`); an `@` **file** completes and sends, an `@` **directory** completes
   and stays open to drill in. With no popup, Enter just sends. · **Tab accept suggestion** (or
-  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **Ctrl+B sidebar** · **Ctrl+R reload** ·
-  ESC stop · Ctrl+C quit. **Ctrl+Shift+C is left for the terminal's copy** (never our quit). (`/exit`
-  aliases `/quit`.)
+  **toggle mode** when no popup) · ↑/↓ navigate · Shift+Tab mode · **PgUp/PgDn scroll** · **Ctrl+B sidebar** ·
+  **Ctrl+R reload** · ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.)
+- **The terminal owns the mouse + clipboard** (`useMouse:false` + `useKittyKeyboard:null`): native
+  selection, `Ctrl+Shift+C/V`, and the right-click menu are the terminal's, not the app's. So there's no
+  mouse-wheel scroll (PgUp/PgDn instead), and `Shift+Enter` can't be distinguished from `Enter` without
+  Kitty (a multi-line newline would be Alt+Enter). See the [terminal-owns-the-mouse micro-default](../DECISIONS.md).
 - **No redundant logs:** state changes that already have a visible indicator don't also print a transcript
   line — mode (PLAN/EDIT badge), model (`/model`, shown in the bar/panel), and the sidebar toggle are silent.
 
@@ -83,6 +86,9 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   sidebar hidden and on a narrow (<100-col) terminal; that the session/files panels size correctly and
   the files pool clips (no overflow past the bottom); that `Ctrl+B` toggles and resize re-applies the
   breakpoint. A non-TTY run falls back to **headless**, so the TUI path can't be exercised in the build env.
-- ESC latency differs by terminal (Kitty protocol) — crisp in Ghostty, timing-based in VS Code.
+- ESC latency is now **timing-based everywhere** (Kitty disambiguation is off) — a lone ESC is
+  recognized after a short delay vs. an escape sequence. Fine in Ghostty.
+- **Verify the keybinds still parse without Kitty**: Shift+Tab (mode) relies on the terminal's legacy
+  back-tab (`ESC[Z`) — if it stops toggling, plain Tab (no popup) and `/mode` are the fallbacks.
 
 **See:** [ARCHITECTURE_BRIEF §8](../ARCHITECTURE_BRIEF.md) · [affordances/D14](../DECISIONS.md) · [usage](usage.md) · [balance](balance.md)

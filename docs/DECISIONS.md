@@ -792,6 +792,12 @@ mutating serialize + call-order results (`tests/loop.test.ts`).
   **Startup default is PLAN** (read-only — safer first contact); `--mode edit` opts into EDIT from launch.
 - **Sidebar:** `Ctrl+B` toggles the session/files sidebar; it auto-hides below 100 cols. The bottom status
   bar shows only while the sidebar is hidden (the session panel carries the same model/mode/cost/ctx/bal).
+- **Terminal owns the mouse + clipboard:** the TUI runs with `useMouse:false` + `useKittyKeyboard:null`
+  (`createCliRenderer`), so the **terminal** does native selection, `Ctrl+Shift+C/V` copy-paste, and the
+  right-click menu — nerve doesn't grab them. Cost: no mouse-wheel scroll (use **PgUp/PgDn**), and
+  `Shift+Enter` is indistinguishable from `Enter` without the Kitty protocol, so a multi-line newline (if
+  added) must use **Alt+Enter**. Chosen because the user (ghostty + neovim) wants the terminal's keybinds
+  to keep working, not be swallowed by the app.
 - **Shell:** the model's `bash` tool and the `!`-shell escape run via the user's shell — `Bun.env.SHELL`
   (zsh on this setup), falling back to `zsh` — not hardcoded `bash`. Non-interactive (`-c`); no rc sourcing.
 - **Startup preflight:** `index.ts` checks required external deps on PATH (the shell + `git`) and exits
