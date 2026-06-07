@@ -120,6 +120,16 @@ export async function defaultSkills(): Promise<string> {
   return defaultSkillCache;
 }
 
+const skillName = (file: string): string => file.split("/")[0] ?? file; // "pyrefly/SKILL.md" → "pyrefly"
+
+/** Names of the skills currently **loaded into context**: the always-on defaults + the active packs'
+ *  (D24/D29). Drives the sidebar's skills panel — "what the agent has in its head right now." */
+export function activeSkillNames(files: Iterable<string>): string[] {
+  const names = DEFAULT_SKILL_FILES.map(skillName);
+  for (const p of activePacks(files)) for (const f of p.skillFiles) names.push(skillName(f));
+  return names;
+}
+
 async function sh(cmd: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), HOOK_TIMEOUT_MS);

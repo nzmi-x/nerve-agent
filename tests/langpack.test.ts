@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { langForFile, activePacks, langSkills, defaultSkills, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
+import { langForFile, activePacks, langSkills, defaultSkills, activeSkillNames, checkSummary, triagePrompt, LANGPACKS } from "../src/langpack.ts";
 
 test("triagePrompt: presents the triage buckets + includes the check summaries", () => {
   const p = triagePrompt(["pyrefly:\n  a.py:1: bad type", "ruff: clean"]);
@@ -32,6 +32,13 @@ test("langSkills: loads pyrefly + ruff + marimo + prettier guidance with frontma
   expect(text).toContain("prettier");
   expect(text).toContain("D24"); // tells the agent nerve auto-runs them
   expect(text).not.toContain("name: pyrefly"); // YAML frontmatter removed
+});
+
+test("activeSkillNames: always-on defaults + the active packs' skills, by touched language (D29)", () => {
+  expect(activeSkillNames([])).toEqual(["git-commit"]); // just the default when nothing's touched
+  const py = activeSkillNames(["app.py"]);
+  expect(py).toEqual(expect.arrayContaining(["git-commit", "pyrefly", "ruff", "marimo"]));
+  expect(activeSkillNames(["x.ts"])).toContain("prettier");
 });
 
 test("defaultSkills: git-commit is always-on (loaded regardless of language), frontmatter stripped", async () => {

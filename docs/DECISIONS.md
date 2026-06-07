@@ -671,9 +671,11 @@ methods (read-only for now). **Refine later:** swap the regex converter for Bun'
 ## D29 — Responsive TUI: main column + collapsible sidebar (web-app mindset)
 **Decision.** The TUI root is a flex **row**, not a column: a **`mainCol`** (`flexGrow:1`, `minWidth:0`)
 holding the existing stack (transcript · todo panel · popup · input · status bar) plus a fixed-width
-(**34-col**) **`sidebar`** beside it with two stacked bordered panels — **session** (title · model · mode
-badge · cost · ctx · balance, mirroring the status bar) and **files** (the session's touched files,
-most-recent first; `✎` = written/edited, `·` = read-only). The sidebar **collapses on `Ctrl+B`** and
+(**34-col**) **`sidebar`** beside it with stacked bordered panels — **session** (title · model · mode
+badge · cost · ctx · balance, mirroring the status bar), **skills** (the skills *loaded into context now*:
+the always-on defaults + active language packs, `activeSkillNames`), **subagents** (this session's `task`
+runs + status — `●` running · `✓` done · `✗` failed, [D6](#d6--subagents-a-read-only-task-tool-over-the-re-entrant-loop); hidden when none), and **files** (the session's touched files,
+most-recent first; `✎` = written/edited, `·` = read-only — `flexGrow` fills the remainder). The sidebar **collapses on `Ctrl+B`** and
 **auto-hides** when the terminal is narrower than **100 cols** (the main column needs the room) — re-checked
 on a guarded `renderer.on("resize")`. Both panels use the proven **fixed-pool-of-`TextRenderable`-rows**
 pattern (like the todo panel, [D25](#d25--a-todo-tool-with-a-pinned-colored-tui-panel)); the files pool is

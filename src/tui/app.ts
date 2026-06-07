@@ -31,12 +31,12 @@ import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
-import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
+import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Message, Provider, ToolSpec } from "../providers/types.ts";
-import type { AskRequest, Todo } from "../tools/types.ts";
+import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
 
@@ -226,25 +226,35 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const W = SIDEBAR_W - 4; // inner text width (border + padding)
   let sidebarOn = true;
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
-  const sessionPanel = new BoxRenderable(renderer, { id: "sessionPanel", flexShrink: 0, border: true, borderStyle: "rounded", borderColor: BORDER, title: " session ", paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
-  const filesPanel = new BoxRenderable(renderer, { id: "filesPanel", flexGrow: 1, border: true, borderStyle: "rounded", borderColor: BORDER, title: " files ", paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
+  const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
+  const mkPanel = (id: string, title: string, grow = false): BoxRenderable =>
+    new BoxRenderable(renderer, { id, flexShrink: 0, ...(grow ? { flexGrow: 1 } : {}), border: true, borderStyle: "rounded", borderColor: BORDER, title, paddingLeft: 1, paddingRight: 1, flexDirection: "column" });
+  const mkRows = (panel: BoxRenderable, n: number, prefix: string, h: number): TextRenderable[] => {
+    const rows: TextRenderable[] = [];
+    for (let i = 0; i < n; i++) {
+      const tr = new TextRenderable(renderer, { id: `${prefix}-${i}`, content: "", height: h });
+      panel.add(tr);
+      rows.push(tr);
+    }
+    return rows;
+  };
+  const sessionPanel = mkPanel("sessionPanel", " session ");
+  const skillsPanel = mkPanel("skillsPanel", " skills ");
+  const subagentsPanel = mkPanel("subagentsPanel", " subagents ");
+  const filesPanel = mkPanel("filesPanel", " files ", true);
   sidebar.add(sessionPanel);
+  sidebar.add(skillsPanel);
+  sidebar.add(subagentsPanel);
   sidebar.add(filesPanel);
   const SESSION_ROWS = 7; // title, blank, model, mode, cost, ctx, bal
-  const sessionRows: TextRenderable[] = [];
-  for (let i = 0; i < SESSION_ROWS; i++) {
-    const tr = new TextRenderable(renderer, { id: `sess-${i}`, content: "", height: 1 });
-    sessionPanel.add(tr);
-    sessionRows.push(tr);
-  }
-  sessionPanel.height = SESSION_ROWS + 2; // + border
+  const SKILL_ROWS = 6;
+  const SUB_ROWS = 6;
   const FILE_ROWS = 40;
-  const fileRows: TextRenderable[] = [];
-  for (let i = 0; i < FILE_ROWS; i++) {
-    const tr = new TextRenderable(renderer, { id: `file-${i}`, content: "", height: 0 });
-    filesPanel.add(tr);
-    fileRows.push(tr);
-  }
+  const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
+  const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
+  const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
+  const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
+  sessionPanel.height = SESSION_ROWS + 2; // + border
   function renderSidebar(): void {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
@@ -255,9 +265,40 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     sessionRows[4]!.content = t`${fg(MUTE)("cost  ")}${fg(FG)(formatCost(s.costUsd))}`;
     sessionRows[5]!.content = t`${fg(MUTE)("ctx   ")}${fg(FG)(formatContext(s.contextTokens, active.contextWindow))}`;
     sessionRows[6]!.content = t`${fg(MUTE)("bal   ")}${fg(GREEN)(formatBalance(balance))}`;
+    // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
+    const skills = activeSkillNames(langTouched).slice(0, SKILL_ROWS);
+    for (let i = 0; i < skillRows.length; i++) {
+      const tr = skillRows[i]!;
+      if (i < skills.length) {
+        tr.content = t`${fg(MAGENTA)("◆")} ${fg(FG)(trunc(skills[i]!, W - 2))}`;
+        tr.height = 1;
+      } else {
+        tr.content = "";
+        tr.height = 0;
+      }
+    }
+    skillsPanel.height = skills.length + 2;
+
+    // subagents panel: this session's `task` delegations + status (● running · ✓ done · ✗ failed). Hidden when none (D6).
+    const subWin = subagents.slice(-SUB_ROWS);
+    for (let i = 0; i < subagentRows.length; i++) {
+      const tr = subagentRows[i]!;
+      if (i < subWin.length) {
+        const sa = subWin[i]!;
+        const icon = sa.status === "running" ? fg(YELLOW)("●") : sa.status === "done" ? fg(GREEN)("✓") : fg(RED)("✗");
+        tr.content = t`${icon} ${fg(MUTE)(trunc(sa.prompt, W - 2))}`;
+        tr.height = 1;
+      } else {
+        tr.content = "";
+        tr.height = 0;
+      }
+    }
+    subagentsPanel.height = subWin.length ? subWin.length + 2 : 0;
+
     // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
     const files = [...langTouched].reverse();
-    const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - (SESSION_ROWS + 5)));
+    const usedAbove = SESSION_ROWS + 2 + (skills.length + 2) + (subWin.length ? subWin.length + 2 : 0) + 2;
+    const cap = Math.max(1, Math.min(FILE_ROWS, renderer.height - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
       if (i < Math.min(files.length, cap)) {
@@ -274,6 +315,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       }
     }
   }
+  // Subagent lifecycle (D6) → the subagents panel. Pushed on start, flipped on end.
+  const onSubagent = (ev: SubagentEvent): void => {
+    if (ev.phase === "start") subagents.push({ id: ev.id, prompt: ev.prompt, status: "running" });
+    else {
+      const e = subagents.find((s) => s.id === ev.id);
+      if (e) e.status = ev.ok ? "done" : "failed";
+    }
+    renderSidebar();
+  };
   function applySidebar(): void {
     const visible = sidebarOn && renderer.width >= SIDEBAR_MIN;
     sidebar.width = visible ? SIDEBAR_W : 0;
@@ -337,6 +387,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     transcriptBox.borderColor = BORDER;
     inputBox.borderColor = BORDER;
     sessionPanel.borderColor = BORDER;
+    skillsPanel.borderColor = BORDER;
+    subagentsPanel.borderColor = BORDER;
     filesPanel.borderColor = BORDER;
     status.bg = PANEL;
     prompt.fg = ACCENT;
@@ -593,6 +645,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     meter = new UsageMeter();
     langTouched.clear(); // fresh session: empty the files panel + reset language packs
     sessionEdited.clear();
+    subagents.length = 0;
     clearTranscript();
     setTodos([]); // fresh session, fresh task list
     transcriptBox.title = " ◆ nerve ";
@@ -611,6 +664,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     meter = new UsageMeter();
     langTouched.clear(); // we don't replay tool calls — the files panel starts empty for the resumed session
     sessionEdited.clear();
+    subagents.length = 0;
     clearTranscript();
     renderHistory(session.messages);
     transcriptBox.title = session.title ? ` ◆ ${session.title} ` : " ◆ nerve ";
@@ -764,7 +818,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal, onSubagent },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {

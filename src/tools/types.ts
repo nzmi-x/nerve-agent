@@ -18,6 +18,15 @@ export interface Todo {
   status: "pending" | "in_progress" | "completed";
 }
 
+/** A subagent lifecycle event (the `task` tool, D6) — drives the sidebar's subagents panel. */
+export interface SubagentEvent {
+  id: string;
+  prompt: string;
+  phase: "start" | "end";
+  /** On `end`: whether the subagent succeeded. */
+  ok?: boolean;
+}
+
 export interface ToolContext {
   /** Working directory; relative tool paths resolve against it. */
   cwd: string;
@@ -37,6 +46,8 @@ export interface ToolContext {
   setTodos?: (todos: Todo[]) => void;
   /** The turn's abort signal (ESC) — so a long-running tool (e.g. `task`'s subagent, D6) cancels too. */
   signal?: AbortSignal;
+  /** Subagent lifecycle hook (the `task` tool, D6) — the TUI renders a subagents panel, headless prints. */
+  onSubagent?: (ev: SubagentEvent) => void;
 }
 
 export interface Tool {

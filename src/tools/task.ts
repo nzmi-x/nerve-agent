@@ -42,8 +42,11 @@ export const task: Tool = {
     const subTools = tools
       .filter((t) => t.readonly && !SUBAGENT_EXCLUDE.has(t.name))
       .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
-    return runSubagent({
-      prompt: args.prompt.trim(),
+    const prompt = args.prompt.trim();
+    const id = Math.random().toString(36).slice(2, 8);
+    ctx.onSubagent?.({ id, prompt, phase: "start" });
+    const out = await runSubagent({
+      prompt,
       provider,
       model: model.id,
       tools: subTools,
@@ -51,5 +54,7 @@ export const task: Tool = {
       signal: ctx.signal ?? new AbortController().signal,
       lsp: ctx.lsp,
     });
+    ctx.onSubagent?.({ id, prompt, phase: "end", ok: !out.startsWith("subagent failed") });
+    return out;
   },
 };
