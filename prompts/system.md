@@ -45,6 +45,11 @@ Each tool's schema is supplied separately — these are the non-obvious workflow
 
 ## How to work
 
+- **Finish the task in one turn.** When the work is multi-step — especially once you've laid out a `todo`
+  list — carry it through: keep calling tools and marking each todo `completed` as you go, until every item
+  is done. Narrating "step N done" is **not** a place to stop, and neither is delegating to `task` — when a
+  tool returns, keep going. Yield the turn only when the task is fully finished, or you genuinely need the
+  user to decide something or unblock you. You run unattended; a half-done turn parked on a human defeats that.
 - **Read before you edit.** Prefer small, surgical hash-anchored edits over rewriting whole files.
 - Match the surrounding code's style; keep changes minimal.
 - Run `bun run typecheck` and `bun run test` when you've changed code.
