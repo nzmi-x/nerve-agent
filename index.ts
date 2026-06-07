@@ -22,7 +22,7 @@ const arg = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 
-const mode: Mode = arg("--mode") === "plan" ? "plan" : "edit";
+const mode: Mode = arg("--mode") === "edit" ? "edit" : "plan"; // default PLAN (read-only) — safer; --mode edit opts in
 const prompt = arg("-p") ?? arg("--print");
 const resume = arg("--resume");
 const noLsp = argv.includes("--no-lsp");
