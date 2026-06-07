@@ -12,7 +12,7 @@ import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
 import { toolSpecs } from "./src/tools/registry.ts";
 import { Lsp } from "./src/lsp/manager.ts";
-import type { Mode } from "./src/dispatch.ts";
+import { PLAN_NOTE, type Mode } from "./src/dispatch.ts";
 import type { Provider } from "./src/providers/types.ts";
 import type { AskRequest } from "./src/tools/types.ts";
 
@@ -87,7 +87,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     langSkillText = await langSkills(packs);
     langSkillKey = key;
   }
-  const sys = [systemPrompt(), await defaultSkills(), packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
+  const sys = [systemPrompt(), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
   await loop({
     provider,
     session,
@@ -170,7 +170,6 @@ const session = new Session(resumeId ? { id: resumeId, resume: true } : {});
 const thinking = entry.thinking ?? false; // D11 kernel default: thinking off
 const fallbacks = fallbacksFor(models, entry); // D15 model ladder
 const lsp = noLsp ? undefined : new Lsp(process.cwd()); // D10: diagnostics-on-edit + the `lsp` tool
-out(`${DIM}nerve · ${entry.id} (${entry.provider}) · ${mode.toUpperCase()} · session ${session.id}${RESET}\n`);
 
 if (prompt) {
   // one-shot

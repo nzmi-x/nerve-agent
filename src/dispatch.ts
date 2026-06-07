@@ -7,6 +7,16 @@ import type { Tool, ToolContext } from "./tools/types.ts";
 export type Mode = "plan" | "edit";
 export type Decision = { ok: true } | { ok: false; reason: string };
 
+// Appended to the system prompt in PLAN so the agent KNOWS it's read-only and can bail out early
+// instead of flailing against refusals. The mode itself is still enforced in `dispatch` (this is just
+// guidance, never authority — the model can't change the mode, D4). EDIT gets no note (default behavior).
+export const PLAN_NOTE =
+  "## Current mode: PLAN (read-only)\n" +
+  "You can read, search, and analyze, but file writes/edits and mutating shell are blocked in this mode. " +
+  "If completing the request needs any of those, do NOT attempt them (they'll be refused) and do NOT keep " +
+  "retrying — stop, tell the user to switch to EDIT mode (Shift+Tab), and briefly say what you'd do once " +
+  "they do. Proceed normally for read-only work (questions, analysis, search, review).";
+
 // Metacharacters that enable chaining / redirection / substitution / subshells — never in PLAN bash.
 // (Glob chars * ? [ ] are allowed; they only expand paths for read commands.)
 const METACHAR = /[<>|;&$`(){}\n\r]/;

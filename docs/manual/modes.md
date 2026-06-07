@@ -15,6 +15,11 @@
   limited to read-only subcommands (`SAFE_GIT`: log/diff/status/show/blame/…, never commit/add/push/…).
 - `dispatch(name, args, mode, ctx)` resolves the tool from the registry, gates it, runs it, and
   returns the result — or `Refused (MODE): …` / `Error: …`. It never throws and never mutates the mode.
+- **`PLAN_NOTE` (prompt-level, not authority).** In PLAN, the surfaces append `PLAN_NOTE` to the system
+  prompt so the agent *knows* it's read-only and can **bail out early** — if a request needs edits/shell,
+  it stops and tells the user to switch to EDIT instead of flailing against refusals. Pure guidance; the
+  gate above is still what enforces the mode (the model can't change it, [D4](../DECISIONS.md)). EDIT gets
+  no note. Wired in `runAgentTurn` (TUI) / `runTurn` (headless).
 - **Destructive-command guard ([D18](../DECISIONS.md)).** Before the mode gate, `dispatch` runs the
   model's `bash` command through `dangerousCommand(cmd)` — a pure blocklist of catastrophic patterns
   (`rm -rf /`/`~`, fork bomb, `mkfs`, whole-disk `dd`, `> /dev/sd*`, writes to `/etc/passwd|shadow`,
