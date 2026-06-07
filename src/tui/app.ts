@@ -105,7 +105,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // Hand the mouse + keyboard back to the terminal: no mouse capture (native selection + right-click
   // menu) and no Kitty keyboard protocol (so the terminal's own Ctrl+Shift+C/V copy-paste keep working
   // instead of being grabbed by the app). Trade-off: Shift+Enter isn't distinguishable from Enter without
-  // Kitty, so the multi-line newline is Alt+Enter; and transcript scroll is by keyboard (PgUp/PgDn).
+  // Kitty, so the multi-line newline is Alt+Enter; and transcript scroll is by keyboard (Ctrl+↑/↓).
   // `/mouse` flips `renderer.useMouse` at runtime to opt into wheel-scroll (then select needs Shift+drag).
   const renderer = await createCliRenderer({ exitOnCtrlC: false, targetFps: 30, useMouse: false, useKittyKeyboard: null });
   renderer.setBackgroundColor(DARKFG);
@@ -262,7 +262,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const setTodos = (todos: Todo[]): void => {
     currentTodos = todos;
     renderTodoPanel(); // the full panel (respects todoVisible)
-    renderSidebar(); // the 1-line summary panel reflects the new state
+    renderTodoSummary(); // just the 1-line sidebar summary — no need to rebuild every panel on a todo write
   };
   const toggleTodos = (): void => {
     todoVisible = !todoVisible;
@@ -318,6 +318,21 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const activityChunk = (pad = false) =>
     fg(aborting ? RED : YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
+  // The 1-line todos panel (the full list is the Ctrl+T panel) — done/total + the current focus. A free
+  // function so a `todo` write can refresh just this panel (`setTodos`) without rebuilding the whole sidebar.
+  function renderTodoSummary(): void {
+    if (sidebar.width === 0) return; // hidden — skip
+    if (currentTodos.length) {
+      const done = currentTodos.filter((td) => td.status === "completed").length;
+      const inProg = currentTodos.find((td) => td.status === "in_progress");
+      const next = inProg ?? currentTodos.find((td) => td.status === "pending");
+      const icon = inProg ? fg(YELLOW)("▸") : next ? fg(MUTE)("○") : fg(GREEN)("✓");
+      todoSumRows[0]!.content = t`${icon} ${fg(MUTE)(`${done}/${currentTodos.length}`)} ${fg(FG)(trunc(next ? next.content : "all done", W - 6))}`;
+    } else {
+      todoSumRows[0]!.content = t`${fg(DIM)("(no todos)")}`;
+    }
+    todosPanel.height = 3; // 1 summary row + border
+  }
   function renderSidebar(): void {
     if (sidebar.width === 0) return; // hidden — skip the work
     const s = meter.snapshot();
@@ -330,18 +345,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     sessionRows[5]!.content = busy ? t`${activityChunk()}` : ""; // animated working/stopping indicator
     sessionRows[5]!.height = busy ? 1 : 0;
     sessionPanel.height = (busy ? 6 : 5) + 2; // grows by the streaming row + border
-
-    // todos panel: a 1-line summary (the full list is the Ctrl+T panel) — done/total + the current focus.
-    if (currentTodos.length) {
-      const done = currentTodos.filter((td) => td.status === "completed").length;
-      const inProg = currentTodos.find((td) => td.status === "in_progress");
-      const next = inProg ?? currentTodos.find((td) => td.status === "pending");
-      const icon = inProg ? fg(YELLOW)("▸") : next ? fg(MUTE)("○") : fg(GREEN)("✓");
-      todoSumRows[0]!.content = t`${icon} ${fg(MUTE)(`${done}/${currentTodos.length}`)} ${fg(FG)(trunc(next ? next.content : "all done", W - 6))}`;
-    } else {
-      todoSumRows[0]!.content = t`${fg(DIM)("(no todos)")}`;
-    }
-    todosPanel.height = 3; // 1 summary row + border
+    renderTodoSummary(); // the 1-line todos panel (also updated directly by setTodos, without a full rebuild)
 
     // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
     const skills = activeSkillNames(langTouched).slice(0, SKILL_ROWS);
@@ -925,7 +929,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         // right-click copy, scroll by keyboard. Lets the user opt into the wheel only when they want it.
         renderer.useMouse = !renderer.useMouse;
         if (renderer.useMouse) sysOk("mouse ON — wheel scrolls the transcript · Shift+drag to select text");
-        else sysInfo("mouse OFF — native select + right-click copy · PgUp/PgDn or Ctrl+↑/↓ to scroll");
+        else sysInfo("mouse OFF — native select + right-click copy · Ctrl+↑/↓ to scroll");
         return;
       case "models":
         openPicker({
@@ -1027,9 +1031,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     let answer: MarkdownRenderable | null = null;
     const argSummaries = new Map<string, string>(); // tool-call id → its key arg, for the `⎿ name arg` line
     // After a tool block prints, the next prose/reasoning block gets a blank line above it for breathing room.
+    // `gapLine` remembers that spacer so a retry (which drops the block) can drop the orphaned gap with it.
     let proseGap = false;
+    let gapLine: TextRenderable | null = null;
     const gapIfNeeded = (): void => {
-      if (proseGap) spacer();
+      if (proseGap) gapLine = addText(() => "");
       proseGap = false;
     };
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
@@ -1086,6 +1092,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
             answer = null;
           }
           reasoningLine = null;
+          gapLine = null; // the block + its gap are committed now — a later retry mustn't remove this gap
           argSummaries.set(id, toolArgSummary(name, args)); // remember what this call does, for its line
           toolCalls.push({ id, name, status: "running" }); // sidebar tools panel: in-flight ●
           renderSidebar();
@@ -1105,7 +1112,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         },
         onRetry: ({ delayMs, model }) => {
           if (answer) removeLine(answer); // drop the failed (usually empty) attempt
+          if (gapLine) removeLine(gapLine); // …and the blank line that opened above it (no orphan gap)
           answer = null; // the retried attempt opens a fresh block on its first text delta
+          gapLine = null;
           reasoningLine = null;
           addText(() => t`${fg(YELLOW)("↻")} ${fg(MUTE)(`retrying on ${model}${delayMs ? ` in ${Math.round(delayMs / 1000)}s` : ""}…`)}`);
         },
