@@ -43,10 +43,10 @@ just drops a launcher that runs the repo's `index.ts`, so hot-reload + prompt ho
 - **System prompt** is `prompts/system.md`, read fresh each turn (so it hot-swaps).
 - **Claude-compat ([D12](../docs/DECISIONS.md)):** nerve discovers skills + slash-commands from the
   `skillRoots`/`commandRoots` (`src/paths.ts`; `~/.claude` + `./.claude` + `~/.nerve`, [D22](../docs/DECISIONS.md))
-  — **built**. Layering project-memory files (`CLAUDE.md`/`AGENTS.md`) into the system prompt is **not yet
-  built** (there is no `src/context.ts`; the prompt is `system.md` + skills + `PLAN_NOTE` + langpacks) —
-  planned in [D37](../docs/DECISIONS.md). nerve's own guide lives at `.claude/CLAUDE.md` (root `CLAUDE.md`
-  is just an `@.claude/CLAUDE.md` import so Claude Code still loads it).
+  — **built**. Layering project-memory files (`CLAUDE.md`/`AGENTS.md`) into the system prompt is **built**
+  ([D42](../docs/DECISIONS.md)): `src/context.ts` `loadProjectMemory` + `baseSystem` in `index.ts`, resolving
+  line-level `@imports`. nerve's own guide lives at `.claude/CLAUDE.md` (root `CLAUDE.md` is just an
+  `@.claude/CLAUDE.md` import so both Claude Code and nerve load it).
 - **State lives in `~/.nerve`, not the project ([D22](../docs/DECISIONS.md)):** sessions live in a
   per-project SQLite DB (`~/.nerve/projects/<cwd-slug>/nerve.db`, `bun:sqlite`, [D31](../docs/DECISIONS.md));
   global + per-project `skills`/`commands` are dirs under the same tree (`src/paths.ts`, `src/db.ts`,

@@ -284,11 +284,11 @@ loads the SKILL.md body lazily (progressive disclosure — `loadSkillBody`), exp
 relevant skills **automatically** via the language packs ([D24](#d24--language-packs-conditional-skills--native-post-edit-hooks)). Keep the loader a pure function of
 the filesystem so it hot-swaps with `/reload` like the other seams ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
 
-**Correction (D37, 2026-06-08).** The `CLAUDE.md` *layering* described above was **never built** — there is
-no `src/context.ts`, and the Phase-1 system-prompt assembly (`index.ts` / `src/tui/app.ts`) ships only
-`system.md` + skills + `PLAN_NOTE` + language packs. The **skills** half of this decision *is* built
-(discovery via `skillRoots`, `src/paths.ts`). D37 commits to building the instruction-file layering,
-expanded to **`AGENTS.md`** alongside `CLAUDE.md`.
+**Correction (D37) → resolved (D42, 2026-06-08).** The `CLAUDE.md` *layering* described above shipped late:
+for a long time there was no `src/context.ts` and the system-prompt assembly was only `system.md` + skills +
+`PLAN_NOTE` + language packs (the **skills** half was built via `skillRoots`/`src/paths.ts`; the
+instruction-file half was not). It is **now built as D42** — `src/context.ts` `loadProjectMemory` +
+`baseSystem` in `index.ts`, resolving `@imports`, **expanded to `AGENTS.md`** alongside `CLAUDE.md`.
 
 ## D13 — Self-documentation: a `manual` tool over `docs/manual/` (the operator's manual)
 **Decision.** nerve ships an **operator's manual it reads before modifying itself** — the
@@ -1066,6 +1066,27 @@ a fixed threshold (declined, as above); collapsing multi-line *block* repetition
 identical-line + char-run — deferred until a real case needs it).
 **Phase.** Built. `src/collapse.ts` + apply in `src/dispatch.ts`; caps removed from `src/tools/{bash,fetch,grep}.ts`;
 tests in `tests/collapse.test.ts` + a `dispatch` read-exemption test. Delivers D37 idea 1.
+
+## D42 — Project-memory loading: CLAUDE.md + AGENTS.md as agent context (builds D12)
+**Decision.** `src/context.ts` `loadProjectMemory(cwd)` reads the project/user memory files and folds them
+into the **base system prompt** (after nerve's own `system.md`), so nerve-the-agent actually reads the repo's
+guidance. Sources, most-general → most-specific (project augments user, D12): `~/.claude/CLAUDE.md` →
+`./CLAUDE.md` → `./.claude/CLAUDE.md` → `./AGENTS.md`. A line that is exactly `@<path>` is **inlined**
+(recursively, depth + cycle guarded) — the convention nerve's own root `CLAUDE.md` uses (`@.claude/CLAUDE.md`);
+each file loads at most once (`seen` dedups an import-then-also-listed file). Whole-file injection — **no**
+structured-section parsing or phase-injection (D37 rejected those). `index.ts`'s `baseSystem(cwd)` is the one
+seam, used by both surfaces (the TUI gets it via the `system` opt; headless re-reads per turn so an edited
+memory file hot-swaps).
+**Why.** This is the capability D12 *claimed* since Phase 1 but **never shipped** — there was no
+`src/context.ts`, so the agent silently ignored the project's own `CLAUDE.md`. Loading it (and the cross-tool
+`AGENTS.md` standard) closes the "environment legibility" gap and makes Claude-compat (D12) real. AGENTS.md
+rides the same mechanism — one loader, both conventions.
+**Rejected.** Parsing AGENTS.md into structured sections + injecting by task phase (couples to the rejected
+phase idea, D39; whole-file is what Claude Code does); a per-file wrapper/marker (kept lean — the files carry
+their own headings); hot-swapping memory via `/reload` (it's read in `baseSystem`, not a tool/interceptor
+leaf — headless re-reads each turn; a mid-session TUI edit needs a restart, acceptable).
+**Phase.** Built (delivers D37 idea 14). `src/context.ts` + `baseSystem` in `index.ts`; tests in
+`tests/context.test.ts`; manual at `docs/manual/context.md`. Reconciles the D12 drift (see D12's correction).
 
 ---
 

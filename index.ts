@@ -7,6 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
+import { loadProjectMemory } from "./src/context.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
@@ -34,6 +35,12 @@ const out = (s: string): void => void process.stdout.write(s);
 function systemPrompt(): string {
   const p = resolve(import.meta.dir, "prompts/system.md");
   return existsSync(p) ? readFileSync(p, "utf8") : "You are nerve, a terminal coding agent.";
+}
+
+/** The base system prompt = nerve's own `system.md` + the project/user memory files (CLAUDE.md/AGENTS.md,
+ *  D42 delivering D12), layered in. Read fresh so an edited memory file hot-swaps. */
+function baseSystem(cwd: string): string {
+  return [systemPrompt(), loadProjectMemory(cwd)].filter(Boolean).join("\n\n");
 }
 
 function compactionPrompt(): string {
@@ -87,7 +94,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     langSkillText = await langSkills(packs);
     langSkillKey = key;
   }
-  const sys = [systemPrompt(), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
+  const sys = [baseSystem(process.cwd()), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
   await loop({
     provider,
     session,
@@ -186,7 +193,7 @@ if (prompt) {
   const cwd = process.cwd();
   const skills = await discoverSkills(skillRoots(cwd));
   const commands = await discoverCommands(commandRoots(cwd));
-  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), skills, commands, compactionPrompt: compactionPrompt(), titlePrompt: titlePrompt(), lsp });
+  await runTui({ models, entry, provider, session, mode, cwd, system: baseSystem(cwd), skills, commands, compactionPrompt: compactionPrompt(), titlePrompt: titlePrompt(), lsp });
 } else {
   // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);
