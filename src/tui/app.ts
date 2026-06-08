@@ -1338,4 +1338,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
   void refreshGit(); // D49: populate the session panel's branch + status on launch
+  herdrReport("idle"); // register with herdr immediately (no-op off a herdr pane) — else an idle nerve that
+  //                      never runs a turn stays invisible in herdr's sidebar (it only knows reported agents)
 }

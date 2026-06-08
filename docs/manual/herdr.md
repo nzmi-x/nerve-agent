@@ -25,9 +25,11 @@ this module does.
   be running (the socket rejects instantly), and telemetry must **never block or fail a turn**.
 - **Valid states are `idle` / `working` / `blocked` / `unknown`** (the server rejects anything else — `done`
   errors with *"invalid pane agent state"*). nerve emits the first three.
-- **State mapping** (hook sites in `app.ts`): turn start → `working`; turn end → `idle`; `ask_user` picker
-  open → `blocked` (answered → `working`); ESC → `idle`; `/compact` → `working`/`idle`. **No report on exit** —
-  `done` isn't valid and herdr detects `PaneExited` when nerve's pane closes.
+- **State mapping** (hook sites in `app.ts`): **launch → `idle`** (registers nerve with herdr the moment it
+  starts — without this, an idle nerve that never runs a turn stays invisible, since herdr only knows
+  *reported* agents); turn start → `working`; turn end → `idle`; `ask_user` picker open → `blocked` (answered →
+  `working`); ESC → `idle`; `/compact` → `working`/`idle`. **No report on exit** — `done` isn't valid and herdr
+  detects `PaneExited` when nerve's pane closes.
 - **Engine-loaded, not hot-swappable:** `herdr.ts` is imported by `app.ts` (the engine), so a running nerve
   must be **restarted** to pick up the integration — `/reload` won't.
 

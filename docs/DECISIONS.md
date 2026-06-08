@@ -1270,9 +1270,10 @@ drives it): a **no-op unless `$HERDR_PANE_ID` is set** (herdr sets it in panes i
 to `$HERDR_SOCKET_PATH` (or `~/.config/herdr/herdr.sock`), writes **one newline-delimited JSON-RPC line**
 (`pane.report_agent`), and is **fire-and-forget** — the promise is never awaited and its rejection swallowed
 (herdr may be down). Hooks in `app.ts`: turn start→`working`, turn end→`idle`, `ask_user`→`blocked`
-(answered→`working`), ESC→`idle`, `/compact`→`working`/`idle`. **No report on exit** — `done` is not a valid
-herdr state (the server rejects it; valid: `idle`/`working`/`blocked`/`unknown`) and herdr detects `PaneExited`
-on its own.
+(answered→`working`), ESC→`idle`, `/compact`→`working`/`idle`, and **launch→`idle`** so an idle nerve registers
+immediately (herdr only knows *reported* agents — without a launch report, a nerve that never runs a turn stays
+invisible). **No report on exit** — `done` is not a valid herdr state (the server rejects it; valid:
+`idle`/`working`/`blocked`/`unknown`) and herdr detects `PaneExited` on its own.
 **Custom harness, confirmed.** herdr's built-in integrations are a fixed list (claude/codex/copilot/…), but
 `pane.report_agent` takes an **arbitrary `agent` label** — so nerve surfaces as its own `nerve` agent without
 being on that list. **Verified against the running server:** driving `herdrReport` (and the `herdr pane
@@ -1288,7 +1289,7 @@ fail a turn.
 **Rejected / deferred.** Making it a tool (it's implicit, not model-driven); blocking the turn on socket I/O
 (fire-and-forget only); Stages 2–4 (custom status labels, a shareable `herdr` skill, native herdr-side
 session restore) — deferred until a real need appears.
-**Phase.** Built (Stage 1). `src/herdr.ts` + 7 hook sites in `src/tui/app.ts`. Tests: `tests/herdr.test.ts`
+**Phase.** Built (Stage 1). `src/herdr.ts` + 8 hook sites in `src/tui/app.ts` (incl. the launch report). Tests: `tests/herdr.test.ts`
 (path resolution + message shape — no socket needed). Manual at `docs/manual/herdr.md`.
 
 ---
