@@ -284,6 +284,12 @@ loads the SKILL.md body lazily (progressive disclosure — `loadSkillBody`), exp
 relevant skills **automatically** via the language packs ([D24](#d24--language-packs-conditional-skills--native-post-edit-hooks)). Keep the loader a pure function of
 the filesystem so it hot-swaps with `/reload` like the other seams ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)).
 
+**Correction (D37, 2026-06-08).** The `CLAUDE.md` *layering* described above was **never built** — there is
+no `src/context.ts`, and the Phase-1 system-prompt assembly (`index.ts` / `src/tui/app.ts`) ships only
+`system.md` + skills + `PLAN_NOTE` + language packs. The **skills** half of this decision *is* built
+(discovery via `skillRoots`, `src/paths.ts`). D37 commits to building the instruction-file layering,
+expanded to **`AGENTS.md`** alongside `CLAUDE.md`.
+
 ## D13 — Self-documentation: a `manual` tool over `docs/manual/` (the operator's manual)
 **Decision.** nerve ships an **operator's manual it reads before modifying itself** — the
 self-hackability prime directive ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)) made operational.
@@ -886,6 +892,91 @@ higher-stakes edits); a dedicated `self` tool/mode (duplicates `read`/`edit`, fa
 reusing the existing tools).
 **Phase.** Built (Phase 1.5). Resolver in `src/tools/resolve.ts` (`tests/resolve.test.ts`); manual page at
 `docs/manual/self.md`.
+
+## D37 — Harness research triage: which `RESEARCH.md` ideas we adopt
+**Context.** `docs/RESEARCH.md` surveyed three reference harnesses (claude-code, oh-my-pi, opencode) plus
+the Masood "Agent Harness Engineering" blog and proposed 15 improvements. We triaged all 15 against the
+actual code — several of the doc's premises were already stale — and recorded a verdict for each (the *no*s
+too, so they aren't re-proposed; [D20](#d20--surveyed-and-deliberately-deferred-or-rejected)'s discipline).
+
+**Through-line (the user's design philosophy, binding on future calls).** (1) **No hardcoded limits that
+truncate or cap** — collapse redundancy or signal the model instead. (2) **Never cap the agent's potential**
+— expose information (cost, context) and let the model decide; reserve hard floors for genuine *safety*
+([D18](#d18--destructive-command-guard-a-mode-independent-safety-floor-on-bash) destructive guard, the turn
+cap), never for cost/output throttling.
+
+**Adopted (unbuilt — build in this order).**
+1. *Output repetition-collapse, replacing the per-tool caps (idea 1).* A pure `collapseRuns()` in `dispatch`
+   collapses repeated lines / char-runs to `⟨repeated N×⟩` on every tool result (`read` exempt — hashline
+   anchors, [D3](#d3--edit-mechanism-hashline-only-content-anchored)). The hard caps (`bash` 30k / `fetch`
+   60k / `grep` 100) are **removed**; huge *non-repetitive* output **signals the model** ("too large —
+   narrow") instead of truncating, pre-empting the non-retryable context-overflow failure.
+2. *Auto-discover tools from `src/tools/` (idea 3).* A glob + `isTool` filter replaces both the static
+   imports and the duplicated `TOOL_MODULES`; `/reload` re-scans, so a new tool file goes live with no edit
+   (extends [D7](#d7--self-hacking-runtime-hot-swap-of-seams)/[D36](#d36--self-modification-from-any-project-the-self-tool-path-prefix)).
+   Initial load moves to an `await` at boot; specs sorted for deterministic order; rollback-on-failure kept
+   ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)).
+3. *Mode-based tool-spec filtering (idea 5).* `toolSpecs(mode)` advertises read-only tools + `bash` in PLAN,
+   all in EDIT — the model can't spend turns on tools the gate will refuse. Tied to the human mode
+   ([D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)), not a guessed turn-number "phase"
+   (rejected).
+4. *`deferrable?` flag on `Tool` (idea 15).* Added now (default false); the filter + threshold land later as
+   a filter over idea-3's discovered set.
+5. *Project-memory loading — `CLAUDE.md` and `AGENTS.md` (idea 14).* Builds the instruction-file layering
+   [D12](#d12--claude-compatibility-load-claudemd--skills-from-claude-and-claude) claimed but never shipped
+   (see the D12 correction), expanded to the `agents.md` standard; whole-file injection. The blog's "parse
+   structured sections + inject by phase" is rejected (couples to the rejected phase idea).
+6. *Model cost/context self-awareness, not a cap (idea 4).* No `--max-cost` stop — the loop already ends when
+   the model stops calling tools (that *is* it deciding). An ephemeral `[status] $spend · ctx N% · todos 3/8
+   (doing: …)` note is appended at the request **tail only** (never the prefix — would bust the auto-cache
+   each turn), via a pure `status?: () => string` `LoopOptions` callback the TUI fills from `UsageMeter`
+   (`contextWindow` already on the model entry); a `system.md` line frames it as ambient pacing, not a stop
+   signal. The same callback folds in a **compact pending-todos summary when the list has open items**
+   (reusing the sidebar summary, [D25](#d25--a-todo-tool-with-a-pinned-colored-tui-panel)) — recency that
+   proactively counters the mid-plan drift [D34](#d34--auto-continue-drive-an-unfinished-todo-list-to-completion-bounded)
+   catches reactively; omitted when no todos are open. Adopts
+   [D20](#d20--surveyed-and-deliberately-deferred-or-rejected)'s "Context Epochs — note only."
+7. *Prefix-stabilization hygiene (idea 10).* Keep the cached prefix byte-stable so DeepSeek/Gemini automatic
+   prefix caching hits: volatile content stays tail-only (idea 4), discovered specs sorted, `system.md`
+   hot-swap re-reads identical bytes. The automatic caching does the rest — the append-only split (idea 11)
+   is rejected as redundant.
+8. *Self-verification by prompt, not LLM-judge (idea 9).* `system.md` nudges the model to run `typecheck`/
+   tests after edit-heavy turns; lean on the deterministic signals already wired (LSP diagnostics on edit +
+   post-edit hooks, [D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config)/[D24](#d24--language-packs-conditional-skills--native-post-edit-hooks)).
+   The blog's `--verify` judge is rejected — weaker and costlier than the compiler for code.
+9. *Between-turn steering (idea 6).* Promotes [D20](#d20--surveyed-and-deliberately-deferred-or-rejected)'s
+   deferred "Queued / steering input": a TUI input queue injects a redirect as a user turn *after* the
+   current turn's tools finish (true mid-turn injection is racy against the serial mutating phase). Policy in
+   `app.ts` ([D34](#d34--auto-continue-drive-an-unfinished-todo-list-to-completion-bounded) pattern); the
+   loop stays pure.
+10. *Startup sliver (idea 12).* Parallelize the preflight checks with config load. No LSP prefetch — servers
+    stay lazy-per-language ([D10](#d10--lsp-support-both-seams-raw-zero-dep-client-schema-backed-config));
+    the DB already opens at session construction.
+
+**Rejected / deferred.**
+- *`defineTool` helper (idea 2) — defer.* `Tool` has one defaultable field (`deferrable` makes two); a
+  builder is indirection for ~zero gain until ≥3 optional fields exist.
+- *Tool-dispatch before/after hooks (idea 7) — reject.* A hot-swappable block/mutate chain at the dispatch
+  gate is a model-editable guardrail surface, forbidden by
+  [D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)/[D36](#d36--self-modification-from-any-project-the-self-tool-path-prefix).
+  The real needs are met hand-built (collapse + mode gate + [D18](#d18--destructive-command-guard-a-mode-independent-safety-floor-on-bash) + secret-redaction); new
+  guardrails get hand-added to `dispatch`, which stays non-swappable.
+- *Ralph loop (idea 8) — reject (covered).* [D34](#d34--auto-continue-drive-an-unfinished-todo-list-to-completion-bounded)
+  already does bounded auto-continue on a todo list and already declined non-todo auto-continue (no
+  completion bound). Don't re-litigate.
+- *Append-only context split (idea 11) — reject.* A cross-cutting rewrite duplicating what automatic caching
+  + idea-10 hygiene already deliver.
+- *Feature-gated dead-code elimination (idea 13) — reject (moot).* `bun:bundle`'s `feature()` needs the build
+  step [D35](#d35--distribution-a-launcher-on-path-never-a-compiled-binary) deliberately removed; adopting it
+  would undo the launcher and kill hot-swap.
+
+**Why.** Recording the verdicts (and the corrections to stale premises) stops the whole survey being
+re-triaged. The triage also surfaced real code-vs-doc drift — most importantly D12 (above); also that ideas
+1/4/8/13 rested on premises the code had outgrown (existing self-caps, an existing `UsageMeter`/
+`contextWindow`, D34, D35).
+
+**Phase.** Decided (triage), 2026-06-08. Adopted items are **unbuilt**; each graduates to its own `D38+`
+entry with a `docs/manual/` page + tests ([AGENT_RULES §2](AGENT_RULES.md)) as it lands, in the order above.
 
 ---
 
