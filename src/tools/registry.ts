@@ -19,9 +19,19 @@ export function toolByName(name: string): Tool | undefined {
   return tools.find((t) => t.name === name);
 }
 
-/** Provider-facing declarations (name/description/parameters), passed to both clients unchanged. */
-export function toolSpecs(): ToolSpec[] {
-  return tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+/** PLAN-visibility (D39): the tools nerve advertises *and* allows in PLAN mode — the read-only set plus
+ *  `bash` (whose individual commands are gated per-command in `dispatch`). The single source of truth for
+ *  "usable in PLAN", shared by `toolSpecs` (advertise) and `dispatch.allowed` (enforce) so they can't drift. */
+export function planVisible(tool: Tool): boolean {
+  return tool.readonly || tool.name === "bash";
+}
+
+/** Provider-facing declarations (name/description/parameters). In PLAN (`planOnly`), only the PLAN-visible
+ *  tools are advertised (D39) — the model never sees a mutator it can't run, so it can't waste a turn on a
+ *  refusal. EDIT advertises the whole set. */
+export function toolSpecs(planOnly = false): ToolSpec[] {
+  const visible = planOnly ? tools.filter(planVisible) : tools;
+  return visible.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
 }
 
 function isTool(v: unknown): v is Tool {

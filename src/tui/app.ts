@@ -34,7 +34,7 @@ import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel } from "./format.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
-import type { Message, Provider, ToolSpec } from "../providers/types.ts";
+import type { Message, Provider } from "../providers/types.ts";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
@@ -56,7 +56,6 @@ export interface TuiOptions {
   mode: Mode;
   cwd: string;
   system: string;
-  tools: ToolSpec[];
   skills: Skill[];
   commands: Command[];
   compactionPrompt: string;
@@ -87,8 +86,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   renderer.setBackgroundColor(theme.DARKFG);
   const { models, cwd, system, skills, commands, compactionPrompt, titlePrompt } = opts;
   const slashExtra: CommandInfo[] = [...skills, ...commands]; // file commands + skills join the `/` popup
-  // Hot-swappable leaf seams (D7): tool specs + interceptor factories. /reload re-imports them.
-  let tools = opts.tools;
+  // Hot-swappable leaf seam (D7): interceptor factories — /reload re-imports them. Tool specs are read
+  // fresh from the discovered registry each turn via toolSpecs(mode === "plan"), so there's no cache to refresh.
   let ic = interceptorsMod;
   // Language packs (D24): sticky set of files touched this session + the cached skill text to inject.
   const langTouched = new Set<string>();
@@ -606,7 +605,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     } catch (e) {
       icErr = e instanceof Error ? e.message : String(e);
     }
-    if (rt.ok) tools = toolSpecs(); // refresh provider-facing specs for the next turn
     if (rt.ok && !icErr) addText(() => t`${fg(theme.GREEN)("↻")} ${fg(theme.MUTE)(`reloaded ${rt.names.length} tools + interceptors from disk`)}`);
     else sysErr(`reload failed (kept the running set) — ${!rt.ok ? rt.error : icErr}`);
   }
@@ -918,7 +916,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         ],
         signal: ac.signal,
         system: sys,
-        tools,
+        tools: toolSpecs(mode === "plan"), // D39: PLAN advertises only PLAN-visible tools (read-only + bash)
         thinking: active.thinking ?? false,
         temperature: active.temperature,
         fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder

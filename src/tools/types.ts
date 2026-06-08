@@ -59,6 +59,9 @@ export interface Tool {
   parameters: Record<string, unknown>;
   /** PLAN-safe? The dispatcher only runs `readonly` tools (+ allowlisted bash) in PLAN mode (D4). */
   readonly: boolean;
+  /** Reserved (D40): when the tool count outgrows the prompt, deferrable tools are held out of the initial
+   *  spec and surfaced on demand. No filtering yet — the flag exists so a tool can declare intent now. */
+  deferrable?: boolean;
   /** Returns the result text shown to the model. Recoverable failures return an `Error: …` string. */
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<string>;
 }

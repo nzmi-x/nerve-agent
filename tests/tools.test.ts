@@ -6,7 +6,7 @@ import { hashLine } from "../src/hashline.ts";
 import { read } from "../src/tools/read.ts";
 import { write } from "../src/tools/write.ts";
 import { edit } from "../src/tools/edit.ts";
-import { tools, toolByName, toolSpecs, loadTools } from "../src/tools/registry.ts";
+import { tools, toolByName, toolSpecs, planVisible, loadTools } from "../src/tools/registry.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 
 const SRC = 'function hello() {\n  console.log("world");\n}\n';
@@ -98,4 +98,23 @@ test("registry: toolSpecs exposes name/description/parameters only", () => {
     expect((s.parameters as { type: string }).type).toBe("object");
     expect(s).not.toHaveProperty("run"); // engine internals stay out of the wire
   }
+});
+
+test("registry: planVisible = read-only tools + bash, the PLAN-usable set (D39)", () => {
+  expect(planVisible(read)).toBe(true); // read-only
+  expect(planVisible(write)).toBe(false); // mutates
+  expect(planVisible(edit)).toBe(false); // mutates
+  expect(planVisible(toolByName("bash")!)).toBe(true); // bash is gated per-command, but PLAN-visible
+  expect(read.deferrable).toBeUndefined(); // D40: tools are non-deferrable by default
+});
+
+test("registry: toolSpecs(planOnly) advertises only PLAN-visible tools (D39)", () => {
+  const all = toolSpecs(false).map((s) => s.name);
+  const plan = toolSpecs(true).map((s) => s.name);
+  expect(plan.length).toBeLessThan(all.length); // mutators are hidden in PLAN
+  expect(plan).toContain("read"); // read-only stays
+  expect(plan).toContain("bash"); // bash stays (per-command gated in dispatch)
+  expect(plan).not.toContain("write"); // mutators gone
+  expect(plan).not.toContain("edit");
+  for (const name of plan) expect(planVisible(toolByName(name)!)).toBe(true); // advertised ⇒ actually visible
 });

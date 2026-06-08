@@ -7,13 +7,16 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 (tests: `tests/tools.test.ts`)
 
 **How it works:**
-- A `Tool` is `{ name, description, parameters (JSON Schema), readonly, run(args, ctx) }`.
+- A `Tool` is `{ name, description, parameters (JSON Schema), readonly, deferrable?, run(args, ctx) }`.
   `run` returns the result string shown to the model; recoverable failures return an `Error: …`
   string rather than throwing.
 - `readonly` drives PLAN-mode gating in the dispatcher ([D4](../DECISIONS.md)) — `read` is readonly,
-  `write`/`edit` are not.
-- `registry.ts` assembles `tools`, `toolByName`, and `toolSpecs()` (the name/description/parameters
-  the providers see — `run` never goes on the wire).
+  `write`/`edit` are not. In PLAN the registry also **advertises** only the PLAN-visible set (read-only +
+  `bash`) via `toolSpecs(planOnly)` ([D39](../DECISIONS.md)); `planVisible` is the shared predicate the
+  dispatcher enforces, so the model never sees a mutator it can't run. `deferrable?` ([D40](../DECISIONS.md))
+  is reserved (no behavior yet) for future deferred loading.
+- `registry.ts` assembles `tools`, `toolByName`, `planVisible`, and `toolSpecs(planOnly)` (the
+  name/description/parameters the providers see — `run` never goes on the wire).
 - `read` emits `hashline.encode` (`LINE#HASH:content`); `edit` drives `hashline.applyEdits` and, on a
   stale anchor, returns the rejection + fresh anchors; on success (small files) it echoes updated
   anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`).

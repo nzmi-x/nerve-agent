@@ -1008,6 +1008,40 @@ the dependency — instead each test that exercises the real registry calls `loa
 tests in `tests/reload.test.ts` (discovery + deterministic order) + `beforeAll(loadTools)` in the
 registry/dispatch/loop suites; manual at `docs/manual/tools.md`.
 
+## D39 — PLAN advertises only the tools it will run (mode-filtered specs)
+**Decision.** `toolSpecs(planOnly)` filters the provider-facing tool list by mode: in **PLAN** it advertises
+only the **PLAN-visible** set — read-only tools **+ `bash`** (whose individual commands are still gated
+per-command in `dispatch`) — and in EDIT the whole set. The predicate `planVisible(tool) = tool.readonly ||
+tool.name === "bash"` lives in `registry.ts` as the **single source of truth**, used by `toolSpecs` to
+*advertise* and by `dispatch.allowed` to *enforce*, so the two can't drift. The TUI + headless surfaces
+compute `toolSpecs(mode === "plan")` **per turn** (mode can flip via Shift+Tab), which retired the old cached
+`opts.tools` spec list.
+**Why.** All tools were advertised in every mode, so in PLAN the model would *see* `write`/`edit` and burn a
+turn calling one only to hit a dispatch refusal (D4). Hiding the mutators makes PLAN structural, not advisory
+— the model can't attempt what it can't run — and trims the PLAN prompt. Tied to the **human-controlled**
+mode, never a guessed "phase": the surveyed turn-number heuristic (early turns = planning) was rejected as an
+arbitrary threshold that fights how real work interleaves reading and editing.
+**Cache.** Within a stable mode `toolSpecs(planOnly)` is byte-identical each turn (sorted set, fixed filter),
+so the providers' automatic prefix cache still hits (D37 idea 10); only a mode switch (rare) changes it.
+**Rejected.** The turn-number planning/execution phase (arbitrary, fragile); putting `planVisible` in
+`dispatch` and importing it into `registry` (would make a `registry → dispatch` runtime cycle — `dispatch`
+already imports `registry`, so the predicate lives in `registry` and the dependency stays one-way).
+**Phase.** Built. `planVisible` + `toolSpecs(planOnly)` in `src/tools/registry.ts`; `allowed()` routes
+through `planVisible` in `src/dispatch.ts`; per-turn specs in `index.ts` + `src/tui/app.ts`; tests in
+`tests/tools.test.ts`. Delivers D37 idea 5.
+
+## D40 — A `deferrable` flag on `Tool` (reserved for deferred loading)
+**Decision.** `Tool` gains an optional `deferrable?: boolean` (default absent = false). **No behavior yet** —
+the field exists so a tool can *declare* intent now; the filtering (hold deferrable tools out of the initial
+spec, surface them on demand) lands only when the tool count outgrows the prompt (~20), as a filter over the
+discovered set (D38).
+**Why.** Adopted from the survey (idea 15) at the user's call, against the usual "no speculative scaffolding"
+default — the field is cheap and makes the eventual deferred-loading change a one-liner. It is the `Tool`
+contract's first *optional* field; per D37 the `defineTool` helper (idea 2) stays deferred until there are ≥3.
+**Rejected.** Building the deferred-loading filter + a count threshold now (the 15-tool set is far from the
+pressure that would justify it — YAGNI until it isn't).
+**Phase.** Field added (`src/tools/types.ts`); no filter logic. Delivers D37 idea 15.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
@@ -1039,7 +1073,7 @@ registry/dispatch/loop suites; manual at `docs/manual/tools.md`.
   conversation preserved, engine untouched. **Rollback implemented** — a failed import keeps the running
   set ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)). Verified live (a disk edit to a tool is picked up).
 - **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).
-- **Tool shape:** `{ name, description, parameters (JSON Schema), readonly: boolean, run(args, ctx) }`.
+- **Tool shape:** `{ name, description, parameters (JSON Schema), readonly: boolean, deferrable?: boolean, run(args, ctx) }`.
   JSON Schema maps cleanly to Gemini `functionDeclarations` and DeepSeek `tools`.
 - **Working dir:** wherever nerve is launched (self-hacks when launched in the nerve repo, [D1](#d1--primary-purpose-personal-coding-agent)).
 - **Turn cap:** a configurable max tool-iteration bound per turn as a runaway safety net.

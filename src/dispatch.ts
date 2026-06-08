@@ -1,7 +1,7 @@
 // The permission gate (D4). PLAN is read-only; EDIT runs everything. The mode is passed in from the
 // human-controlled TUI — there is deliberately NO way for the model to change it (no set_mode tool,
 // no model-writable flag). This is a hand-built safety seam (D11) and stays that way.
-import { toolByName } from "./tools/registry.ts";
+import { toolByName, planVisible } from "./tools/registry.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 export type Mode = "plan" | "edit";
@@ -98,9 +98,10 @@ export function isReadOnlyTool(name: string): boolean {
 /** The policy: may this tool call run in this mode? Pure — the unit-tested heart of the gate. */
 export function allowed(tool: Tool, args: Record<string, unknown>, mode: Mode): Decision {
   if (mode === "edit") return { ok: true };
-  if (tool.readonly) return { ok: true };
-  if (tool.name === "bash") return planBashAllowed(typeof args.command === "string" ? args.command : "");
-  return { ok: false, reason: `${tool.name} mutates — blocked in PLAN mode (switch to EDIT to run it)` };
+  // PLAN: only PLAN-visible tools (read-only + bash) may run — the same predicate the registry advertises
+  // (D39), so the model is never offered a tool the gate will refuse. bash is further gated per-command.
+  if (!planVisible(tool)) return { ok: false, reason: `${tool.name} mutates — blocked in PLAN mode (switch to EDIT to run it)` };
+  return tool.name === "bash" ? planBashAllowed(typeof args.command === "string" ? args.command : "") : { ok: true };
 }
 
 /** Resolve a tool by name, gate it by mode, run it. Returns the result or a refusal/error string. */

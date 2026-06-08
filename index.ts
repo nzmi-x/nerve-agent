@@ -105,7 +105,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     interceptors: [secretRedaction(), reasoningRouter((d) => out(DIM + d + RESET)), tokenTap(session)],
     signal: ac.signal,
     system: sys,
-    tools: toolSpecs(),
+    tools: toolSpecs(mode === "plan"),
     thinking,
     temperature,
     fallbacks, // D15: transient errors fall down the model ladder, then back off
@@ -186,7 +186,7 @@ if (prompt) {
   const cwd = process.cwd();
   const skills = await discoverSkills(skillRoots(cwd));
   const commands = await discoverCommands(commandRoots(cwd));
-  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), tools: toolSpecs(), skills, commands, compactionPrompt: compactionPrompt(), titlePrompt: titlePrompt(), lsp });
+  await runTui({ models, entry, provider, session, mode, cwd, system: systemPrompt(), skills, commands, compactionPrompt: compactionPrompt(), titlePrompt: titlePrompt(), lsp });
 } else {
   // piped stdin: a simple line REPL
   out(`${DIM}Type a message, Enter to send. Ctrl+D to exit.${RESET}\n> `);
