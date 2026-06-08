@@ -34,12 +34,17 @@ export function buildRequestBody(req: ProviderRequest): Record<string, unknown> 
     } else if (m.role === "assistant") {
       const parts: Record<string, unknown>[] = [];
       if (m.content) parts.push({ text: m.content });
-      for (const tc of m.toolCalls ?? []) {
+      (m.toolCalls ?? []).forEach((tc, idx) => {
         const part: Record<string, unknown> = { functionCall: { name: tc.name, id: tc.id, args: parseArgs(tc.args) } };
-        // MANDATORY on the first functionCall part of a tool turn (§2.6) — Session stores it only there.
+        // §2.6/§11: the FIRST functionCall of a model turn MUST carry a thoughtSignature on Gemini 3 — omit it
+        // and the API 400s. Real ones come from the stream (Session stores it on the first FC only). If history
+        // has none here — a session that started on DeepSeek then switched to Gemini, or a synthesized/older
+        // turn — send Google's documented validator-skip token so the replay can't 400. Parallel/subsequent
+        // FCs correctly stay signatureless.
         if (tc.signature) part.thoughtSignature = tc.signature;
+        else if (idx === 0) part.thoughtSignature = "skip_thought_signature_validator";
         parts.push(part);
-      }
+      });
       contents.push({ role: "model", parts: parts.length ? parts : [{ text: "" }] });
       i++;
     } else if (m.role === "tool") {

@@ -52,8 +52,13 @@
           "description": "Optional sampling temperature override for this model."
         },
         "effort": {
-          "enum": ["off", "low", "medium", "high", "xhigh"],
-          "description": "Default thinking effort (D52). Use a level the provider supports — DeepSeek: off/high/xhigh; Gemini: low/medium/high. Runtime-overridable via the /model picker and /effort. Unset → falls back to the legacy `thinking` boolean, then off."
+          "enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
+          "description": "Default thinking effort (D52). Use a level the provider supports — DeepSeek: off/high/xhigh; Gemini: minimal/low/medium/high (minimal not on Pro). Runtime-overridable via the /model picker and /effort. Unset → falls back to the legacy `thinking` boolean, then off."
+        },
+        "efforts": {
+          "type": "array",
+          "items": { "enum": ["off", "minimal", "low", "medium", "high", "xhigh"] },
+          "description": "Optional: narrow the SELECTABLE efforts for this model to a subset of the provider's set (e.g. Gemini Pro = [low, medium, high], no minimal). Unset → the provider's full set."
         },
         "thinking": {
           "type": "boolean",

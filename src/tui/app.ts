@@ -22,8 +22,8 @@ import { loop } from "../loop.ts";
 import * as interceptorsMod from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
 import { reloadTools, toolSpecs } from "../tools/registry.ts";
-import { providerFor, fallbacksFor, entryEffort, type ModelEntry } from "../config.ts";
-import { PROVIDER_EFFORTS, type Effort } from "../effort.ts";
+import { providerFor, fallbacksFor, entryEffort, modelEfforts, type ModelEntry } from "../config.ts";
+import { type Effort } from "../effort.ts";
 import { UsageMeter, formatCost, formatContext, formatModelStatus } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, dropBrokenPaste, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
@@ -820,7 +820,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   // D52: thinking-effort picker — the levels the active model's provider supports, the current one marked.
   function openEffortPicker(): void {
-    const efforts = PROVIDER_EFFORTS[active.provider];
+    const efforts = modelEfforts(active); // D52: the model's selectable set (Gemini Pro drops `minimal`, §10)
     openPicker({
       title: `thinking effort · ${active.id} · ↑/↓ · Enter select · Esc close`,
       items: efforts.map((e) => ({ label: e, desc: e === "off" ? "no thinking — fastest" : "reasoning effort", current: e === effort })),

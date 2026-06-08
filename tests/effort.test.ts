@@ -1,16 +1,17 @@
 import { test, expect } from "bun:test";
 import { modelEffort, effortLabel, PROVIDER_EFFORTS } from "../src/effort.ts";
 
-test("PROVIDER_EFFORTS: DeepSeek can turn thinking off; Gemini's floor is low", () => {
+test("PROVIDER_EFFORTS: DeepSeek can turn thinking off; Gemini's floor is minimal (§10)", () => {
   expect(PROVIDER_EFFORTS.deepseek).toEqual(["off", "high", "xhigh"]);
-  expect(PROVIDER_EFFORTS.gemini).toEqual(["low", "medium", "high"]);
-  expect(PROVIDER_EFFORTS.gemini).not.toContain("off");
+  expect(PROVIDER_EFFORTS.gemini).toEqual(["minimal", "low", "medium", "high"]);
+  expect(PROVIDER_EFFORTS.gemini).not.toContain("off"); // Gemini 3 always thinks — minimal is the floor
 });
 
 test("modelEffort: a valid configured level passes through", () => {
   expect(modelEffort("deepseek", "high")).toBe("high");
   expect(modelEffort("deepseek", "xhigh")).toBe("xhigh");
   expect(modelEffort("gemini", "medium")).toBe("medium");
+  expect(modelEffort("gemini", "minimal")).toBe("minimal");
 });
 
 test("modelEffort: a level the provider doesn't support → off", () => {

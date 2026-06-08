@@ -4,14 +4,14 @@
 // modules additionally treat `off` (or any level they don't take) gracefully — they omit the knob, falling
 // back to the model default — so e.g. compaction can ask for "off" on a Gemini model and just get its default.
 
-export type Effort = "off" | "low" | "medium" | "high" | "xhigh";
+export type Effort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
-/** Selectable efforts per provider — their real API capability (only two providers, charter-locked). The
- *  `/model` + `/effort` pickers show exactly these. DeepSeek can disable thinking ("off"); Gemini 3 always
- *  thinks, so its floor is "low". */
+/** Selectable efforts per provider — their real API capability (only two providers, charter-locked). A model
+ *  can narrow this via its `efforts` (e.g. Gemini Pro drops `minimal`); see `modelEfforts`. DeepSeek can
+ *  disable thinking ("off"); Gemini 3 always thinks, so its floor is "minimal" (§10 thinkingLevel ladder). */
 export const PROVIDER_EFFORTS: Record<"deepseek" | "gemini", Effort[]> = {
   deepseek: ["off", "high", "xhigh"],
-  gemini: ["low", "medium", "high"],
+  gemini: ["minimal", "low", "medium", "high"],
 };
 
 /** Normalize a model's configured effort — a string, a legacy `thinking` boolean, or unset — to a valid

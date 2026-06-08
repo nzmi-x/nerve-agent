@@ -79,6 +79,29 @@ test("buildRequestBody: tool turn replays thoughtSignature on first call; result
   ]);
 });
 
+test("buildRequestBody: first functionCall with no signature gets the dummy validator-skip (§11) — avoids a 400 after a DeepSeek→Gemini switch", () => {
+  const body = buildRequestBody({
+    model: "m",
+    messages: [
+      { role: "user", content: "do it" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "fc_1", name: "edit", args: '{"path":"a"}' }, // no signature (e.g. produced on DeepSeek)
+          { id: "fc_2", name: "edit", args: '{"path":"b"}' }, // parallel — must stay signatureless
+        ],
+      },
+      { role: "tool", toolCallId: "fc_1", content: "ok" },
+    ],
+  });
+  const modelTurn = (body.contents as Record<string, unknown>[])[1]!;
+  expect(modelTurn.parts).toEqual([
+    { functionCall: { name: "edit", id: "fc_1", args: { path: "a" } }, thoughtSignature: "skip_thought_signature_validator" },
+    { functionCall: { name: "edit", id: "fc_2", args: { path: "b" } } }, // subsequent FC stays bare
+  ]);
+});
+
 // --- mapStream --------------------------------------------------------------
 
 test("mapStream: thought part → reasoning, text part → text, usage once at end, done stop", async () => {

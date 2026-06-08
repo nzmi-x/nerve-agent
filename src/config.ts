@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { deepseek } from "./providers/deepseek.ts";
 import { gemini } from "./providers/gemini.ts";
 import { globalModelsPath } from "./paths.ts";
-import { modelEffort, type Effort } from "./effort.ts";
+import { modelEffort, PROVIDER_EFFORTS, type Effort } from "./effort.ts";
 import type { Provider } from "./providers/types.ts";
 import type { Candidate } from "./loop.ts";
 import type { Pricing } from "./usage.ts";
@@ -21,6 +21,9 @@ export interface ModelEntry {
   /** Default thinking effort (D52): off | low | medium | high | xhigh, within the provider's supported set
    *  (see `PROVIDER_EFFORTS`). Unset → falls back to the legacy `thinking` boolean, then "off". */
   effort?: Effort;
+  /** Optional: narrow the *selectable* efforts for THIS model to a subset of the provider's set — e.g.
+   *  Gemini Pro doesn't support `minimal` (§10). Unset → the provider's full set (`PROVIDER_EFFORTS`). */
+  efforts?: Effort[];
   /** @deprecated use `effort`. Legacy boolean — true → "high", false → "off". */
   thinking?: boolean;
   /** Max context window in tokens — drives the context-used indicator. */
@@ -93,4 +96,11 @@ export function fallbacksFor(models: ModelEntry[], active: ModelEntry): Candidat
 /** A model's default thinking effort (D52) — its `effort`, the legacy `thinking` boolean, else "off". */
 export function entryEffort(entry: ModelEntry): Effort {
   return modelEffort(entry.provider, entry.effort ?? entry.thinking);
+}
+
+/** The efforts selectable for `entry` (D52) — its `efforts` override (filtered to valid provider levels),
+ *  else the provider's full set. Drives the /model + /effort pickers. */
+export function modelEfforts(entry: ModelEntry): Effort[] {
+  const all = PROVIDER_EFFORTS[entry.provider];
+  return entry.efforts?.length ? entry.efforts.filter((e) => all.includes(e)) : all;
 }

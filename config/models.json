@@ -32,6 +32,7 @@
       "provider": "gemini",
       "label": "Gemini Pro — current Pro tier (preview) until 3.5-pro ships; default thinkingLevel high",
       "effort": "high",
+      "efforts": ["low", "medium", "high"],
       "contextWindow": 1000000,
       "pricing": { "input": 2.0, "output": 12.0 }
     },
@@ -40,6 +41,7 @@
       "provider": "gemini",
       "label": "Gemini Pro — NOT RELEASED yet (placeholder for when it ships; will 404 until then)",
       "effort": "high",
+      "efforts": ["low", "medium", "high"],
       "contextWindow": 1000000
     }
   ]

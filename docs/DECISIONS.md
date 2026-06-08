@@ -1295,11 +1295,12 @@ session restore) — deferred until a real need appears.
 ---
 
 ## D52 — Thinking effort as a first-class, selectable level (not a boolean)
-**Decision.** Replace the engine-wide `thinking: boolean` with an **`Effort`** level — `off | low | medium |
-high | xhigh` (`src/effort.ts`) — that each provider maps to its own knob: DeepSeek's `reasoning_effort`
-(high/xhigh, or `thinking:disabled` for off), Gemini's `thinkingLevel` (low/medium/high; off → omit → model
-default, since Gemini 3 always thinks). Each provider exposes the levels it actually accepts
-(`PROVIDER_EFFORTS`: DeepSeek `off/high/xhigh`, Gemini `low/medium/high`) — that's what the pickers offer.
+**Decision.** Replace the engine-wide `thinking: boolean` with an **`Effort`** level — `off | minimal | low |
+medium | high | xhigh` (`src/effort.ts`) — that each provider maps to its own knob: DeepSeek's `reasoning_effort`
+(high/xhigh, or `thinking:disabled` for off), Gemini's `thinkingLevel` (minimal/low/medium/high; off → omit →
+model default, since Gemini 3 always thinks). `PROVIDER_EFFORTS` is each provider's full set (DeepSeek
+`off/high/xhigh`, Gemini `minimal/low/medium/high` per the §10 thinkingLevel table); a model can **narrow** it
+via `efforts` — Gemini **Pro** drops `minimal` (it's Flash/Flash-Lite only), so the pickers use `modelEfforts`.
 - **Per-model default** in `config/models.json` (`effort`, replacing `thinking`; legacy boolean still parsed —
   `true`→high, `false`→off — via `entryEffort`/`modelEffort`). The committed default model **`deepseek-v4-flash`
   is `high`** (the user's pick); unset → `off` (the D11 speed default).
@@ -1314,7 +1315,10 @@ that knows provider capabilities is the two provider modules (charter-locked to 
 `PROVIDER_EFFORTS` map. Engine stays a pure pass-through (`loop`/`ProviderRequest` carry `effort`).
 **Phase.** Built. `src/effort.ts`; `effort` on `ProviderRequest`/`Candidate`/`LoopOptions`/`ModelEntry`; both
 providers map it; `app.ts` `/model`→effort + `/effort` + status; `index.ts` headless path. Tests:
-`tests/effort.test.ts` + updated provider tests. Manuals: `config.md`, `providers.md`.
+`tests/effort.test.ts` + updated provider tests. Manuals: `config.md`, `providers.md`. The Gemini levels
+(`minimal` + the per-model `efforts`) were reconciled against the compiled Gemini docs (§10 thinkingLevel
+table); the same review hardened `gemini.ts` to inject Google's `skip_thought_signature_validator` dummy on a
+signature-less first `functionCall` (§11), so a DeepSeek→Gemini `/model` switch mid-session no longer 400s.
 
 ---
 

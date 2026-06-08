@@ -43,7 +43,10 @@
 - `reasoning_content` on an assistant turn is **mandatory to replay** when that turn called tools.
 - Thinking mode ignores `temperature`; both clients omit it then (Gemini omits it always, §2.3).
 - Gemini's `thoughtSignature` is **mandatory** on the first `functionCall` of a tool turn — Session
-  stores it on that call, `buildRequestBody` replays it. Drop it → HTTP 400.
+  stores it on that call, `buildRequestBody` replays it. Drop it → HTTP 400. If the first FC has **no** stored
+  signature (history that began on DeepSeek then `/model`-switched to Gemini, or a synthesized/older turn),
+  `buildRequestBody` injects Google's documented **`skip_thought_signature_validator`** dummy so the replay
+  can't 400 (§11); parallel/subsequent FCs correctly stay signatureless.
 - Live end-to-end needs `DEEPSEEK_API_KEY` / `GEMINI_API_KEY` in `.env` — the pure functions don't.
 
 **See:** [docs/providers.md](../providers.md) · [ARCHITECTURE_BRIEF §4](../ARCHITECTURE_BRIEF.md) · [stream](stream.md)

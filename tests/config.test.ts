@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadModels, selectModel, selectSubagentModel, providerFor } from "../src/config.ts";
+import { loadModels, selectModel, selectSubagentModel, providerFor, entryEffort, modelEfforts } from "../src/config.ts";
 
 test("loadModels: bundled catalog (no global override); default is deepseek-v4-flash", () => {
   const saved = Bun.env.NERVE_HOME;
@@ -10,6 +10,33 @@ test("loadModels: bundled catalog (no global override); default is deepseek-v4-f
     const models = loadModels();
     expect(models.length).toBeGreaterThanOrEqual(2);
     expect(selectModel(models).id).toBe("deepseek-v4-flash");
+  } finally {
+    if (saved === undefined) delete Bun.env.NERVE_HOME;
+    else Bun.env.NERVE_HOME = saved;
+  }
+});
+
+test("entryEffort / modelEfforts: default effort + selectable set, with the per-model override (D52)", () => {
+  // default effort: configured value, legacy boolean, else off
+  expect(entryEffort({ id: "a", provider: "deepseek", effort: "high" })).toBe("high");
+  expect(entryEffort({ id: "a", provider: "deepseek", thinking: true })).toBe("high"); // legacy
+  expect(entryEffort({ id: "a", provider: "gemini" })).toBe("off"); // unset
+  // selectable set: provider default, or the model's `efforts` override (filtered to valid levels)
+  expect(modelEfforts({ id: "g", provider: "gemini" })).toEqual(["minimal", "low", "medium", "high"]);
+  expect(modelEfforts({ id: "d", provider: "deepseek" })).toEqual(["off", "high", "xhigh"]);
+  expect(modelEfforts({ id: "pro", provider: "gemini", efforts: ["low", "medium", "high"] })).toEqual(["low", "medium", "high"]);
+  expect(modelEfforts({ id: "x", provider: "gemini", efforts: ["low", "xhigh"] })).toEqual(["low"]); // xhigh isn't a Gemini level → filtered out
+});
+
+test("loadModels: the catalog's Gemini Pro models drop `minimal` (§10)", () => {
+  const saved = Bun.env.NERVE_HOME;
+  Bun.env.NERVE_HOME = join(tmpdir(), "nerve-no-global-config2");
+  try {
+    const models = loadModels();
+    const pro = models.find((m) => m.id === "gemini-3.1-pro-preview")!;
+    expect(modelEfforts(pro)).not.toContain("minimal");
+    const flash = models.find((m) => m.id === "gemini-3.5-flash")!;
+    expect(modelEfforts(flash)).toContain("minimal"); // Flash supports it
   } finally {
     if (saved === undefined) delete Bun.env.NERVE_HOME;
     else Bun.env.NERVE_HOME = saved;
