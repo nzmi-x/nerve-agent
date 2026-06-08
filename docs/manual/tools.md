@@ -52,16 +52,22 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
   only the final summary (cap 8 k). `readonly` → PLAN-safe (it spawns a read-only agent). Abortable via
   `ctx.signal`. For context-heavy isolable lookups; do small/edit work inline instead.
 
-**Hot-swap ([D7](../DECISIONS.md)):** the active set is a **mutable** `let tools` in `registry.ts`;
-`reloadTools()` re-imports every entry in `TOOL_MODULES` **cache-busted** (`import("./x.ts?t=…")`) and
-swaps it — so `/reload`/Ctrl+R picks up edits to a tool's `run` live, no restart. On any failure the old
-set is **kept** (rollback, [D11](../DECISIONS.md)). `dispatch` resolves via `toolByName` against the live
-set, so the swap needs no engine change. Keep tool files re-import-safe (no top-level side effects).
+**Discovery + hot-swap ([D7](../DECISIONS.md)/[D38](../DECISIONS.md)):** the active set is a **mutable**
+`let tools` in `registry.ts`, **discovered** by scanning `src/tools/*.ts` (`Bun.Glob` over
+`import.meta.dir`) — each module's `Tool`-shaped exports are collected (export names need not match the
+tool name) and **sorted by name** for a deterministic spec order. `loadTools()` populates it once at boot
+(`index.ts`); `reloadTools()` re-scans **cache-busted** (`import("./x.ts?t=…")`), so `/reload`/Ctrl+R picks
+up edits to a tool's `run` **and newly-added tool files** live, no restart. On any failure (a bad import,
+or a module that exports no Tool) the old set is **kept** (rollback, [D11](../DECISIONS.md)). `dispatch`
+resolves via `toolByName` against the live set, so the swap needs no engine change. Keep tool files
+re-import-safe (no top-level side effects).
 
 **How to change it:**
-- **Add a tool** = a new `src/tools/<name>.ts` exporting a `Tool`, then add it to `tools` **and**
-  `TOOL_MODULES` in `registry.ts` (the latter so it hot-reloads). Set `readonly` honestly. A tool must
-  earn its rent ([D2](../DECISIONS.md)): high frequency × reuse × token-savings vs. an ad-hoc bash call.
+- **Add a tool** = just drop a new `src/tools/<name>.ts` exporting a `Tool` — discovery
+  ([D38](../DECISIONS.md)) picks it up at the next boot, and `/reload` makes it live with **no
+  `registry.ts` edit**. Set `readonly` honestly. A tool must earn its rent ([D2](../DECISIONS.md)): high
+  frequency × reuse × token-savings vs. an ad-hoc bash call. (A non-tool *helper* file placed under
+  `src/tools/` must be listed in `NOT_TOOLS` in `registry.ts`, or the scan rejects it — loud over silent.)
 - Keep `run` thin and side-effect-honest (`Bun.file`/`Bun.write`/`Bun.$`/`fetch`). Resolve paths
   via `resolvePath(ctx.cwd, p)` (`src/tools/resolve.ts`), **not** raw `resolve(ctx.cwd, p)` — that's
   what honors the `self:` prefix (target nerve's own source from any cwd, [D36](../DECISIONS.md), see

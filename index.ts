@@ -10,7 +10,7 @@ import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
-import { toolSpecs } from "./src/tools/registry.ts";
+import { toolSpecs, loadTools } from "./src/tools/registry.ts";
 import { Lsp } from "./src/lsp/manager.ts";
 import { PLAN_NOTE, type Mode } from "./src/dispatch.ts";
 import type { Provider } from "./src/providers/types.ts";
@@ -148,6 +148,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
 // --- boot -------------------------------------------------------------------
 preflight();
 ensureLayout(); // create ~/.nerve/{skills,commands} + this workspace's dirs (D22)
+await loadTools(); // D38: discover the tool set from src/tools/ before any toolSpecs()/dispatch read it
 const models = loadModels();
 const entry = selectModel(models, arg("--model"));
 let provider: Provider;

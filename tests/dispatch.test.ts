@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,14 @@ import { write } from "../src/tools/write.ts";
 import { edit } from "../src/tools/edit.ts";
 import { bash } from "../src/tools/bash.ts";
 import { manual } from "../src/tools/manual.ts";
+import { loadTools } from "../src/tools/registry.ts";
 import type { ToolContext } from "../src/tools/types.ts";
+
+// The registry is discovered lazily at boot now (D38) — the dispatch() tests resolve real tools by name,
+// so populate the set first.
+beforeAll(async () => {
+  await loadTools();
+});
 
 // --- planBashAllowed --------------------------------------------------------
 

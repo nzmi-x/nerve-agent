@@ -978,6 +978,36 @@ re-triaged. The triage also surfaced real code-vs-doc drift — most importantly
 **Phase.** Decided (triage), 2026-06-08. Adopted items are **unbuilt**; each graduates to its own `D38+`
 entry with a `docs/manual/` page + tests ([AGENT_RULES §2](AGENT_RULES.md)) as it lands, in the order above.
 
+## D38 — Tool registry by filesystem discovery (no static list)
+**Decision.** The tool registry is **discovered**, not hand-listed. `registry.ts` scans its own directory
+(`src/tools/*.ts` via `Bun.Glob` over `import.meta.dir`), imports each module, and collects every
+`Tool`-shaped export (a small `isTool` guard; export names need not match the tool name — `fetch.ts`
+exports `fetchTool`, `ask.ts` exports `askUser`). The set is **sorted by tool name** (locale-independent
+compare) for a deterministic spec order. `loadTools()` populates it once at boot (`index.ts`, an `await`
+after `ensureLayout`); `reloadTools()` re-scans **cache-busted** so `/reload` (D7) picks up edited tools
+**and brand-new tool files** with no registration edit. This delivers D37's adopted idea 3: the old
+triple-registration (a static `import`, the `tools` array, and the `TOOL_MODULES` list) collapses to
+"drop a file."
+**Why.** Adding a tool meant editing three places in lockstep (the surveyed "own friction"); the `tools`
+array and `TOOL_MODULES` were the same 15 entries written twice. Discovery removes the duplication and
+**upgrades self-hacking** (D36): nerve can write itself a new tool and `/reload` it live — no restart, no
+array edit. Sorting keeps the provider-facing spec order stable across machines/restarts so the providers'
+automatic prefix cache hits (D37 idea 10).
+**How it stays safe.** Discovery is async (ESM `import()`), so the initial set moves to a boot `await` —
+nothing reads `tools` before then (verified: no module-eval consumers). The `task.ts → registry.ts` cycle
+is unaffected (task reads `tools` only at runtime, after population). Rollback (D11) is preserved and
+slightly stricter: a module that fails to import **or exports no Tool** throws, so a broken edit keeps the
+running set instead of silently dropping a tool. A non-tool helper added under `src/tools/` must be named
+in `NOT_TOOLS`, or the scan rejects it (loud over silent).
+**Rejected.** Keeping the static imports for the initial set + discovery only for reload (still edits
+`registry.ts` per tool — half a fix); a top-level `await` inside `registry.ts` to auto-populate on import
+(**deadlocks** the `task.ts ↔ registry.ts` cycle — task's static import would block on registry's TLA while
+registry awaits the dynamic import of task); a global `bun test` preload to populate the registry (hides
+the dependency — instead each test that exercises the real registry calls `loadTools()` in `beforeAll`).
+**Phase.** Built. `src/tools/registry.ts` (`loadTools`/`reloadTools`/`scanTools`); boot in `index.ts`;
+tests in `tests/reload.test.ts` (discovery + deterministic order) + `beforeAll(loadTools)` in the
+registry/dispatch/loop suites; manual at `docs/manual/tools.md`.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
@@ -1005,7 +1035,7 @@ entry with a `docs/manual/` page + tests ([AGENT_RULES §2](AGENT_RULES.md)) as 
 - **Sessions:** `/resume [id]` switches to an existing session (default = most recent that isn't the
   current one); `/sessions` lists them; `/sessions delete <id>` removes one (not the current — that's `/drop`).
 - **Hot reload (built, Phase 1.5):** `/reload` + `Ctrl+R` re-import `src/tools/` (via `reloadTools()`,
-  cache-busted per `TOOL_MODULES`) and `src/interceptors.ts` ([D7](#d7--self-hacking-runtime-hot-swap-of-seams));
+  cache-busted, **discovered** from `src/tools/` — no static list, D38) and `src/interceptors.ts` ([D7](#d7--self-hacking-runtime-hot-swap-of-seams));
   conversation preserved, engine untouched. **Rollback implemented** — a failed import keeps the running
   set ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)). Verified live (a disk edit to a tool is picked up).
 - **System prompt:** `prompts/system.md`, read fresh per turn (hot-swappable, agent-editable).

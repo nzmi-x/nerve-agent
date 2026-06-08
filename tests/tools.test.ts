@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,7 @@ import { hashLine } from "../src/hashline.ts";
 import { read } from "../src/tools/read.ts";
 import { write } from "../src/tools/write.ts";
 import { edit } from "../src/tools/edit.ts";
-import { tools, toolByName, toolSpecs } from "../src/tools/registry.ts";
+import { tools, toolByName, toolSpecs, loadTools } from "../src/tools/registry.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 
 const SRC = 'function hello() {\n  console.log("world");\n}\n';
@@ -19,6 +19,11 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+// The registry is discovered lazily at boot now (D38), so populate it before the registry tests read it.
+beforeAll(async () => {
+  await loadTools();
 });
 
 /** Pull the `LINE#HASH` anchor for a 1-based line out of read-tool output. */

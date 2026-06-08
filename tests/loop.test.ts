@@ -1,11 +1,11 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loop } from "../src/loop.ts";
 import { stopGuard } from "../src/interceptors.ts";
 import { Session } from "../src/session.ts";
-import { tools as registryTools } from "../src/tools/registry.ts";
+import { tools as registryTools, loadTools } from "../src/tools/registry.ts";
 import type { Tool } from "../src/tools/types.ts";
 import type { Provider, StreamEvent } from "../src/providers/types.ts";
 
@@ -20,6 +20,12 @@ function fakeProvider(turns: StreamEvent[][]): Provider {
     },
   };
 }
+
+// The registry is discovered lazily at boot now (D38) — the loop dispatches real tools (e.g. `write`)
+// by name, so populate the set before any test runs.
+beforeAll(async () => {
+  await loadTools();
+});
 
 let dir: string;
 beforeEach(async () => {
