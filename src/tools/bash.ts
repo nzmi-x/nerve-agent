@@ -2,7 +2,6 @@ import { resolve } from "node:path";
 import type { Tool } from "./types.ts";
 
 const TIMEOUT_MS = 120_000;
-const MAX_OUTPUT = 30_000;
 // Run via the user's login shell (zsh on this setup), not hardcoded bash. Non-interactive (`-c`), so
 // it doesn't source rc files — same as before, just zsh semantics. `SHELL` is verified at startup.
 const SHELL = Bun.env.SHELL || "zsh";
@@ -38,8 +37,7 @@ export const bash: Tool = {
     ]);
     clearTimeout(timer);
 
-    let out = [stdout, stderr].filter(Boolean).join("\n").trimEnd();
-    if (out.length > MAX_OUTPUT) out = out.slice(0, MAX_OUTPUT) + `\n… (truncated; ${out.length} chars)`;
+    const out = [stdout, stderr].filter(Boolean).join("\n").trimEnd();
     const status = timedOut ? ` (timed out after ${TIMEOUT_MS / 1000}s)` : code !== 0 ? ` (exit ${code})` : "";
     return (out || "(no output)") + status;
   },

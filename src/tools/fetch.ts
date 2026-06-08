@@ -4,7 +4,6 @@
 import type { Tool } from "./types.ts";
 
 const TIMEOUT_MS = 30_000;
-const MAX_OUTPUT = 60_000;
 const MAX_BYTES = 5_000_000; // skip huge bodies
 
 const ENT: Record<string, string> = {
@@ -94,7 +93,6 @@ export const fetchTool: Tool = {
       out = raw;
     }
     out = out.trim();
-    if (out.length > MAX_OUTPUT) out = `${out.slice(0, MAX_OUTPUT)}\n… (truncated; ${out.length} chars)`;
     return `${url}\n\n${out || "(empty response)"}`;
   },
 };

@@ -17,11 +17,14 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
   is reserved (no behavior yet) for future deferred loading.
 - `registry.ts` assembles `tools`, `toolByName`, `planVisible`, and `toolSpecs(planOnly)` (the
   name/description/parameters the providers see — `run` never goes on the wire).
+- Every tool result except `read` passes through `collapseRuns` ([D41](../DECISIONS.md)) in `dispatch`:
+  runs of identical lines / 80+-char runs collapse to `⟨repeated N×⟩` / `⟨×N⟩`, so redundant output can't
+  bloat context — the tail is never lost (vs. a truncating cap). The old per-tool output caps are gone.
 - `read` emits `hashline.encode` (`LINE#HASH:content`); `edit` drives `hashline.applyEdits` and, on a
   stale anchor, returns the rejection + fresh anchors; on success (small files) it echoes updated
   anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`).
 - `bash` runs `$SHELL -c` (zsh on this setup, falls back to `zsh`) via `Bun.spawn` (combined
-  stdout+stderr, 2-min kill timeout, output capped). The shell is verified at startup (`preflight`).
+  stdout+stderr, 2-min kill timeout). The shell is verified at startup (`preflight`).
   `ls`/`glob`/`grep` are readonly search — `Bun.Glob` for matching, pure-JS line scan for grep
   (dependency-free; skips `node_modules`/`.git`/`references`/binary/huge files). `bash` is *not*
   interruptible by ESC yet (only the timeout stops it) — `ToolContext` has no signal.
@@ -42,8 +45,8 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
   call). `readonly` → PLAN-safe (only UI state). Shown via `ctx.setTodos`: a **pinned colored panel**
   in the TUI, a printed checklist headless.
 - `fetch` ([D28](../DECISIONS.md)) — Bun-native HTTP GET of a URL → **HTML to Markdown**, JSON
-  pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Caps timeout/
-  size; skips binary. Export is `fetchTool` (avoids shadowing global `fetch`).
+  pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Times out + skips
+  downloads over 5 MB + binary. Export is `fetchTool` (avoids shadowing global `fetch`).
 - `search` ([D33](../DECISIONS.md)) — a thin sibling of `fetch` for when there's **no URL**: GETs
   `lite.duckduckgo.com/lite/?q=…` (minimal JS-free HTML) and parses the rows into a ranked
   `{title, url, snippet}` list; the agent then `fetch`es a result to read it. Unwraps DDG's `/l/?uddg=`

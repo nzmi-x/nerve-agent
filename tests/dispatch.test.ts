@@ -146,3 +146,16 @@ test("dispatch: the D18 guard refuses catastrophic bash even in EDIT mode", asyn
   const res = await dispatch("bash", { command: "rm -rf /" }, "edit", ctx);
   expect(res).toContain("Refused (guard)");
 });
+
+test("dispatch: collapses repeated output, but never read (D41 — read anchors stay byte-exact)", async () => {
+  await write.run({ path: "rule.txt", content: "=".repeat(120) + "\n" }, ctx);
+
+  // read goes through dispatch but is EXEMPT — collapse would rewrite the 120 '=' and corrupt the anchor
+  const readOut = await dispatch("read", { path: "rule.txt" }, "edit", ctx);
+  expect(readOut).toContain("=".repeat(120));
+  expect(readOut).not.toContain("⟨×");
+
+  // a non-read tool's output IS collapsed
+  const bashOut = await dispatch("bash", { command: "printf 'dup\\ndup\\ndup\\ndup\\n'" }, "edit", ctx);
+  expect(bashOut).toContain("⟨repeated 4×⟩");
+});

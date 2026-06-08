@@ -909,8 +909,9 @@ cap), never for cost/output throttling.
 1. *Output repetition-collapse, replacing the per-tool caps (idea 1).* A pure `collapseRuns()` in `dispatch`
    collapses repeated lines / char-runs to `⟨repeated N×⟩` on every tool result (`read` exempt — hashline
    anchors, [D3](#d3--edit-mechanism-hashline-only-content-anchored)). The hard caps (`bash` 30k / `fetch`
-   60k / `grep` 100) are **removed**; huge *non-repetitive* output **signals the model** ("too large —
-   narrow") instead of truncating, pre-empting the non-retryable context-overflow failure.
+   60k / `grep` 100) are **removed** (built as D41). *(Refined at build: per the user's "rip out the caps"
+   choice, no signal/threshold replaces them — the huge-non-repetitive-output overflow residual is left to
+   compaction/pruning; see D41.)*
 2. *Auto-discover tools from `src/tools/` (idea 3).* A glob + `isTool` filter replaces both the static
    imports and the duplicated `TOOL_MODULES`; `/reload` re-scans, so a new tool file goes live with no edit
    (extends [D7](#d7--self-hacking-runtime-hot-swap-of-seams)/[D36](#d36--self-modification-from-any-project-the-self-tool-path-prefix)).
@@ -1041,6 +1042,30 @@ contract's first *optional* field; per D37 the `defineTool` helper (idea 2) stay
 **Rejected.** Building the deferred-loading filter + a count threshold now (the 15-tool set is far from the
 pressure that would justify it — YAGNI until it isn't).
 **Phase.** Field added (`src/tools/types.ts`); no filter logic. Delivers D37 idea 15.
+
+## D41 — Collapse repeated tool output instead of truncating (no output caps)
+**Decision.** A pure `collapseRuns(text)` (`src/collapse.ts`) runs on every tool result in `dispatch`: runs
+of identical consecutive lines collapse to one line + `⟨repeated N×⟩`, and a single character repeated 80+
+times within a line collapses to `<char>⟨×N⟩`. It removes only *redundancy* (the content and the count both
+survive), so the **tail is never lost** — unlike the old per-tool truncation caps, which sliced the end off
+(often the useful part). `read` is **exempt** (its `LINE#HASH` anchors must stay byte-exact for `edit`, D3).
+The per-tool output caps are **removed**: `bash` (30k), `fetch` (60k), `grep` (100 matches). Resource guards
+stay (timeouts, `fetch`'s 5 MB download skip, `grep`'s huge-file skip + 200-char per-line slice).
+**Why.** The user's standing preference (memory: *avoid hardcoded limits*): truncation discards information
+— usually the tail, where a final error/summary lives — while real output bloat is overwhelmingly
+*repetition* (logs, progress bars, stack-trace loops), which collapses losslessly. One pass in `dispatch`
+covers every tool (and every future one), so no tool re-implements a cap.
+**The overflow residual (accepted).** Genuinely huge *non-repetitive* output (a broad `grep`, a 5 MB minified
+blob) that collapse can't shrink is **not** pre-truncated — per the user's explicit choice to "rip out the
+caps entirely," it flows through and is left to compaction/pruning (D17). The cost is a known sharp edge: one
+such result can overflow a turn's context (a non-retryable failure in `loop`). A context-window-aware
+*signal* ("too large — narrow", floated in D37's idea-1 note) was **not** built — it reintroduces a threshold
+the user declined; it stays a future option if overflow bites in practice.
+**Rejected.** A central char ceiling in `dispatch` (a hardcoded cap by another name); a "too large" signal on
+a fixed threshold (declined, as above); collapsing multi-line *block* repetition (beyond consecutive-
+identical-line + char-run — deferred until a real case needs it).
+**Phase.** Built. `src/collapse.ts` + apply in `src/dispatch.ts`; caps removed from `src/tools/{bash,fetch,grep}.ts`;
+tests in `tests/collapse.test.ts` + a `dispatch` read-exemption test. Delivers D37 idea 1.
 
 ---
 

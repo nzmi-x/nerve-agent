@@ -4,7 +4,6 @@ import type { Tool } from "./types.ts";
 
 const IGNORE = /(^|\/)(node_modules|\.git|references|\.nerve|dist|out)\//;
 const BINARY = /\x00/; // a NUL byte ⇒ treat the file as binary and skip it
-const MAX_MATCHES = 100;
 const MAX_FILE_BYTES = 1_000_000;
 
 export const grep: Tool = {
@@ -32,7 +31,7 @@ export const grep: Tool = {
     const pattern = typeof args.glob === "string" ? args.glob : "**/*";
     const matches: string[] = [];
     try {
-      outer: for await (const rel of new Bun.Glob(pattern).scan({ cwd: base, onlyFiles: true, dot: false })) {
+      for await (const rel of new Bun.Glob(pattern).scan({ cwd: base, onlyFiles: true, dot: false })) {
         if (IGNORE.test(rel)) continue;
         const file = Bun.file(resolve(base, rel));
         if (file.size > MAX_FILE_BYTES) continue;
@@ -42,7 +41,6 @@ export const grep: Tool = {
         for (let i = 0; i < lines.length; i++) {
           if (re.test(lines[i]!)) {
             matches.push(`${rel}:${i + 1}:${lines[i]!.slice(0, 200)}`);
-            if (matches.length >= MAX_MATCHES) break outer;
           }
         }
       }
@@ -50,7 +48,6 @@ export const grep: Tool = {
       return `Error: ${(e as Error).message}`;
     }
     if (matches.length === 0) return "No matches.";
-    const capped = matches.length >= MAX_MATCHES;
-    return matches.join("\n") + (capped ? `\n… (capped at ${MAX_MATCHES} matches)` : "");
+    return matches.join("\n");
   },
 };

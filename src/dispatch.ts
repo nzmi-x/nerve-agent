@@ -2,6 +2,7 @@
 // human-controlled TUI — there is deliberately NO way for the model to change it (no set_mode tool,
 // no model-writable flag). This is a hand-built safety seam (D11) and stays that way.
 import { toolByName, planVisible } from "./tools/registry.ts";
+import { collapseRuns } from "./collapse.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 export type Mode = "plan" | "edit";
@@ -121,7 +122,10 @@ export async function dispatch(
   const decision = allowed(tool, args, mode);
   if (!decision.ok) return `Refused (${mode.toUpperCase()} mode): ${decision.reason}`;
   try {
-    return await tool.run(args, ctx);
+    const result = await tool.run(args, ctx);
+    // D41: collapse repeated lines/char-runs so redundant output can't bloat context — but never `read`
+    // (its LINE#HASH anchors must stay byte-exact for `edit`, D3).
+    return tool.name === "read" ? result : collapseRuns(result);
   } catch (e) {
     return `Error running ${name}: ${e instanceof Error ? e.message : String(e)}`;
   }
