@@ -31,11 +31,11 @@ test("buildRequestBody: prepends system, sets stream + include_usage", () => {
   expect(body.thinking).toBeUndefined();
 });
 
-test("buildRequestBody: thinking true → enabled + effort, temperature omitted", () => {
+test("buildRequestBody: effort high → enabled + reasoning_effort, temperature omitted", () => {
   const body = buildRequestBody({
     model: "m",
     messages: [{ role: "user", content: "x" }],
-    thinking: true,
+    effort: "high",
     temperature: 0.7,
   });
   expect(body.thinking).toEqual({ type: "enabled" });
@@ -43,11 +43,17 @@ test("buildRequestBody: thinking true → enabled + effort, temperature omitted"
   expect(body.temperature).toBeUndefined(); // ignored under thinking (§1.6)
 });
 
-test("buildRequestBody: thinking false → disabled, temperature kept", () => {
+test("buildRequestBody: effort xhigh → enabled + xhigh", () => {
+  const body = buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], effort: "xhigh" });
+  expect(body.thinking).toEqual({ type: "enabled" });
+  expect(body.reasoning_effort).toBe("xhigh");
+});
+
+test("buildRequestBody: effort off → disabled, temperature kept", () => {
   const body = buildRequestBody({
     model: "m",
     messages: [{ role: "user", content: "x" }],
-    thinking: false,
+    effort: "off",
     temperature: 0.2,
   });
   expect(body.thinking).toEqual({ type: "disabled" });

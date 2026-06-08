@@ -30,13 +30,16 @@ test("buildRequestBody: system → systemInstruction, user → contents, tools �
   expect(body.tools).toEqual([{ functionDeclarations: [{ name: "read", description: "read a file", parameters: { type: "object" } }] }]);
 });
 
-test("buildRequestBody: thinking true → thinkingConfig high; temperature never sent (3.x)", () => {
-  const body = buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], thinking: true, temperature: 0.7 });
+test("buildRequestBody: effort → thinkingLevel (medium/high); temperature never sent (3.x)", () => {
+  const body = buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], effort: "high", temperature: 0.7 });
   expect(body.generationConfig).toEqual({ thinkingConfig: { thinkingLevel: "high", includeThoughts: true } });
+  expect(buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], effort: "medium" }).generationConfig).toEqual({
+    thinkingConfig: { thinkingLevel: "medium", includeThoughts: true },
+  });
 });
 
-test("buildRequestBody: thinking false/absent → no generationConfig (model default)", () => {
-  expect(buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], thinking: false }).generationConfig).toBeUndefined();
+test("buildRequestBody: effort off/absent → no generationConfig (model default)", () => {
+  expect(buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], effort: "off" }).generationConfig).toBeUndefined();
   expect(buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }] }).generationConfig).toBeUndefined();
 });
 

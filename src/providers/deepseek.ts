@@ -47,15 +47,17 @@ export function buildRequestBody(req: ProviderRequest): Record<string, unknown> 
     body.tool_choice = "auto";
   }
 
-  // V4 defaults thinking ON; the kernel passes `thinking: false` for speed (D11). Only an explicit
-  // value is sent. Thinking mode ignores temperature, so omit it then (§1.6).
-  if (req.thinking === true) {
-    body.thinking = { type: "enabled" };
-    body.reasoning_effort = "high";
-  } else if (req.thinking === false) {
+  // Effort → reasoning (D52). "off" disables thinking; "high"/"xhigh" enable it at that `reasoning_effort`.
+  // Absent → omit (model default; V4 defaults thinking ON). Thinking ignores temperature, so omit it then
+  // (§1.6). (Gemini-only levels like "low"/"medium" are never sent here — DeepSeek models map to off/high/xhigh.)
+  const thinkingOn = req.effort !== undefined && req.effort !== "off";
+  if (req.effort === "off") {
     body.thinking = { type: "disabled" };
+  } else if (thinkingOn) {
+    body.thinking = { type: "enabled" };
+    body.reasoning_effort = req.effort; // "high" | "xhigh"
   }
-  if (req.temperature !== undefined && req.thinking !== true) body.temperature = req.temperature;
+  if (req.temperature !== undefined && !thinkingOn) body.temperature = req.temperature;
 
   return body;
 }

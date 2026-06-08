@@ -51,9 +51,13 @@
           "maximum": 2,
           "description": "Optional sampling temperature override for this model."
         },
+        "effort": {
+          "enum": ["off", "low", "medium", "high", "xhigh"],
+          "description": "Default thinking effort (D52). Use a level the provider supports — DeepSeek: off/high/xhigh; Gemini: low/medium/high. Runtime-overridable via the /model picker and /effort. Unset → falls back to the legacy `thinking` boolean, then off."
+        },
         "thinking": {
           "type": "boolean",
-          "description": "Optional: request the provider's reasoning/thinking mode for this model."
+          "description": "Deprecated — use `effort`. Legacy boolean: true → high, false → off."
         },
         "contextWindow": {
           "type": "integer",

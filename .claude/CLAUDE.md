@@ -35,7 +35,9 @@ just drops a launcher that runs the repo's `index.ts`, so hot-reload + prompt ho
   Never move keys into `models.json` or any committed/agent-editable file.
 - **Models** live in committed `config/models.json` (Bun imports JSON natively), validated by
   `config/models.schema.json` via an inline `$schema` ref (editor IntelliSense + validation). Entries are
-  `{ id, provider, label?, default?, temperature?, thinking? }`. Add a model = add an entry, not code.
+  `{ id, provider, label?, default?, temperature?, effort? }`. `effort` (D52) is the default thinking effort —
+  off|low|medium|high|xhigh, per the provider's supported set; runtime-overridable via `/model`→effort + `/effort`.
+  Add a model = add an entry, not code.
 - **LSP servers** live in committed `config/lsp.json` (+ `config/lsp.schema.json`), mapping
   `extensions → { id, command, args, rootMarkers? }`. Add a language = add an entry; the `command`
   must already be on PATH (nerve doesn't install servers).

@@ -17,10 +17,12 @@
   (or resumes), reads `prompts/system.md`, and drives `loop` — one-shot with `-p "…"` or a stdin REPL,
   streaming to stdout (reasoning dimmed). Flags: `-p/--print`, `--model <id>`, `--mode plan|edit`
   (default edit), `--resume <id>|last`. `--resume last` = newest session by mtime (`src/sessions.ts`).
-  Kernel default: `thinking` off ([D11](../DECISIONS.md)).
+  Default thinking effort comes from each model's `effort` (D52); unset → `off` ([D11](../DECISIONS.md)).
 
 **How to change it:**
-- Add a model → edit `config/models.json` (+ its schema); no code change.
+- Add a model → edit `config/models.json` (+ its schema); no code change. Set its `effort`
+  (off|low|medium|high|xhigh, per provider — DeepSeek off/high/xhigh, Gemini low/medium/high). Runtime:
+  `/model` picks a model then its effort; `/effort` changes the current model's effort ([D52](../DECISIONS.md)).
 - Wire a new provider → add it to the `PROVIDERS` map. Keys stay in `.env`, never in the catalog.
 - LSP servers live in the parallel `config/lsp.json` (same pattern: committed catalog + schema, with a
   `~/.nerve/lsp.json` override, [D22](../DECISIONS.md)). See [lsp](lsp.md). The `Lsp` manager is created

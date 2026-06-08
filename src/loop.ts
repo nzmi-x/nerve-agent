@@ -7,12 +7,13 @@ import { isTransient, isContextOverflow, backoffMs, sleep } from "./retry.ts";
 import type { Message, Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec } from "./providers/types.ts";
 import type { Session } from "./session.ts";
 import type { ToolContext } from "./tools/types.ts";
+import type { Effort } from "./effort.ts";
 
 /** A model to run a turn on. The first is the primary; the rest are the fallback ladder (D15). */
 export interface Candidate {
   provider: Provider;
   model: string;
-  thinking?: boolean;
+  effort?: Effort;
   temperature?: number;
 }
 
@@ -37,7 +38,7 @@ export interface LoopOptions {
   /** Ambient status note (D43) appended to the request tail each turn — a surface fills it from the usage
    *  meter + todos so the model can pace itself. Empty/absent → nothing injected. Called fresh per turn. */
   status?: () => string;
-  thinking?: boolean;
+  effort?: Effort;
   temperature?: number;
   /** Model-ladder fallbacks tried (delay 0) before backing off on a transient error (D15). */
   fallbacks?: Candidate[];
@@ -59,7 +60,7 @@ export interface LoopOptions {
 export async function loop(opts: LoopOptions): Promise<void> {
   const maxTurns = opts.maxTurns ?? 24;
   const candidates: Candidate[] = [
-    { provider: opts.provider, model: opts.model, thinking: opts.thinking, temperature: opts.temperature },
+    { provider: opts.provider, model: opts.model, effort: opts.effort, temperature: opts.temperature },
     ...(opts.fallbacks ?? []),
   ];
   const maxRetries = opts.retry?.maxRetries ?? 2;
@@ -78,7 +79,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
       messages: withStatus(opts.session.messages, opts.status?.()),
       ...(opts.system ? { system: opts.system } : {}),
       ...(opts.tools ? { tools: opts.tools } : {}),
-      ...(cand.thinking !== undefined ? { thinking: cand.thinking } : {}),
+      ...(cand.effort !== undefined ? { effort: cand.effort } : {}),
       ...(cand.temperature !== undefined ? { temperature: cand.temperature } : {}),
     };
 

@@ -12,8 +12,8 @@
   `contents`, `system`→`systemInstruction`, tools→`functionDeclarations`. An assistant tool turn becomes
   `model` parts with a `functionCall` per call (**`thoughtSignature` replayed on the first** — a 400 if
   omitted, §2.6); consecutive `tool` results merge into **one** `user` turn of `functionResponse` parts
-  (`{name,id,response:{result}}`). Gemini 3.x: `thinking:true`→`thinkingConfig.thinkingLevel:"high"`;
-  sampling params (temperature) omitted.
+  (`{name,id,response:{result}}`). Gemini 3.x: `effort`→`thinkingConfig.thinkingLevel` (low/medium/high; off
+  or absent → omit, model default — D52); sampling params (temperature) omitted.
 - `mapStream` — each SSE frame is a whole `GenerateContentResponse`; parts → text / reasoning
   (`thought:true`) / `tool_call` (complete in one part, running `index`; signature read camelCase
   `thoughtSignature` with a snake_case fallback). `usageMetadata` captured and emitted once at the end.
@@ -21,7 +21,8 @@
 **How it works (deepseek.ts):**
 - `buildRequestBody(req)` — pure translation to DeepSeek's `chat/completions` body: prepends
   `system`, maps assistant tool-call turns (replaying `reasoning_content`), tool results
-  (`role:"tool"`, `tool_call_id`), tools, and `thinking` (only when explicit; V4 defaults ON).
+  (`role:"tool"`, `tool_call_id`), tools, and `effort` → `reasoning_effort` high/xhigh or `thinking:disabled`
+  (off); absent → omit, V4 defaults ON (D52).
 - `mapStream(frames)` — pure: consumes `sse()` payloads, emits `text`/`reasoning`/`tool_call`/`usage`,
   and a single `done` at the end (`[DONE]` ends the stream). `finish_reason` maps to `DoneReason`.
 - `deepseek.stream(req, signal)` — wires `fetch` → `sse` → `mapStream`; on `!res.ok` emits a raw

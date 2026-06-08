@@ -63,9 +63,12 @@ export function buildRequestBody(req: ProviderRequest): Record<string, unknown> 
   if (req.tools?.length) {
     body.tools = [{ functionDeclarations: req.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }];
   }
-  // 3.x uses thinkingLevel (replaces thinking_budget). thinking:false / absent → omit (model default).
+  // Effort → thinkingLevel (D52; 3.x replaced thinking_budget with thinkingLevel). low/medium/high map
+  // straight through; "off"/absent → omit (model default — Gemini 3 always thinks, so there's no true off).
   // Gemini 3.x: temperature/topP/topK are no longer recommended (§2.3) — we omit sampling params.
-  if (req.thinking === true) body.generationConfig = { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } };
+  if (req.effort && req.effort !== "off") {
+    body.generationConfig = { thinkingConfig: { thinkingLevel: req.effort, includeThoughts: true } };
+  }
 
   return body;
 }

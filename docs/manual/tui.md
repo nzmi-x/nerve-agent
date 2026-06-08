@@ -31,7 +31,8 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   tools=green, subagents=yellow, files=orange, git=green; the transcript box is accent-blue).
   **session** tops the stack and now **carries the cwd + git branch** (task 3 — the old standalone cwd panel
   was merged in): working dir (starship-style `shortenPath`) · `⎇ branch · ● dirty · ↑↓` · model ·
-  mode badge · cost · ctx · balance — the *session title* lives in the transcript box header, not here),
+  mode badge + thinking effort (`mode [EDIT]  think high`, D52) · cost · ctx · balance — the *session title*
+  lives in the transcript box header, not here),
   **todos** (a **1-line summary** of the task list — `▸ done/total <current focus>`, the always-visible
   counterpart to the Ctrl+T full panel), **lsp** (spawned
   language servers + state `●`/`◌`/`✗`, from `Lsp.serverStatus()`), **tools** also shows the **post-edit
@@ -67,7 +68,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   prose → tools → prose → tools in order, instead of pooling all prose at the top and all tool lines at
   the bottom. (`sealBlock` closes the final block in the `finally`; a free helper because TS can't narrow
   the closure-mutated `answer`.)
-- **Status bar:** `cwd · ⎇ branch · model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a
+- **Status bar:** `cwd · ⎇ branch · model · [MODE badge] · think <effort> · cost · ctx · bal` via `t` styled segments + a
   `bg` mode badge, fed by `UsageMeter` (on `usage` events) + `fetchBalance` (startup / `/model` / `/balance`).
   **Shown only when the sidebar is hidden** (the session panel carries the same fields, D29) — when the
   sidebar is up the bar collapses (`height 0`) and the indicator shows in the session panel instead. The

@@ -114,7 +114,7 @@ export async function summarize(
     model,
     system,
     messages: [{ role: "user", content: `<conversation>\n${convo}\n</conversation>${ask}` }],
-    thinking: false,
+    effort: "off", // summarize fast/cheap — no thinking (DeepSeek disables; Gemini omits → model default)
   };
   let text = "";
   for await (const ev of provider.stream(req, signal)) {

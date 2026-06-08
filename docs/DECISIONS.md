@@ -1294,6 +1294,30 @@ session restore) — deferred until a real need appears.
 
 ---
 
+## D52 — Thinking effort as a first-class, selectable level (not a boolean)
+**Decision.** Replace the engine-wide `thinking: boolean` with an **`Effort`** level — `off | low | medium |
+high | xhigh` (`src/effort.ts`) — that each provider maps to its own knob: DeepSeek's `reasoning_effort`
+(high/xhigh, or `thinking:disabled` for off), Gemini's `thinkingLevel` (low/medium/high; off → omit → model
+default, since Gemini 3 always thinks). Each provider exposes the levels it actually accepts
+(`PROVIDER_EFFORTS`: DeepSeek `off/high/xhigh`, Gemini `low/medium/high`) — that's what the pickers offer.
+- **Per-model default** in `config/models.json` (`effort`, replacing `thinking`; legacy boolean still parsed —
+  `true`→high, `false`→off — via `entryEffort`/`modelEffort`). The committed default model **`deepseek-v4-flash`
+  is `high`** (the user's pick); unset → `off` (the D11 speed default).
+- **Runtime override in the TUI:** **`/model`** opens the model picker then **chains into an effort picker**
+  (pick model → pick effort), and **`/effort`** changes the current model's effort directly. The current
+  effort shows in the status bar + the session panel's mode row (`mode [EDIT]  think high`).
+**Why.** `thinking:true` hardcoded `"high"` for both providers, so there was no way to pick xhigh, a lighter
+level, or turn it off per-session — exactly what the user asked for. Effort is a property of *how* you want a
+model to run, so it belongs next to the model selection + as its own quick command.
+**Charter fit.** Still "add a model = add a config entry, not code" — `effort` is a schema field; the only code
+that knows provider capabilities is the two provider modules (charter-locked to two providers) + the small
+`PROVIDER_EFFORTS` map. Engine stays a pure pass-through (`loop`/`ProviderRequest` carry `effort`).
+**Phase.** Built. `src/effort.ts`; `effort` on `ProviderRequest`/`Candidate`/`LoopOptions`/`ModelEntry`; both
+providers map it; `app.ts` `/model`→effort + `/effort` + status; `index.ts` headless path. Tests:
+`tests/effort.test.ts` + updated provider tests. Manuals: `config.md`, `providers.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a

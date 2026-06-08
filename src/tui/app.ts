@@ -22,7 +22,8 @@ import { loop } from "../loop.ts";
 import * as interceptorsMod from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
 import { reloadTools, toolSpecs } from "../tools/registry.ts";
-import { providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
+import { providerFor, fallbacksFor, entryEffort, type ModelEntry } from "../config.ts";
+import { PROVIDER_EFFORTS, type Effort } from "../effort.ts";
 import { UsageMeter, formatCost, formatContext, formatModelStatus } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, dropBrokenPaste, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
@@ -100,6 +101,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   let active = opts.entry;
   let provider = opts.provider;
+  let effort: Effort = entryEffort(active); // D52: current thinking effort — model's default, changed via /model + /effort
   let session = opts.session;
   let meter = new UsageMeter();
   let balance: Balance | null = null;
@@ -294,6 +296,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       model: active.id,
       contextWindow: active.contextWindow,
       mode,
+      effort,
       balance,
       usage: { costUsd: s.costUsd, contextTokens: s.contextTokens },
       busy,
@@ -607,7 +610,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const branch = gitData.branch ? fg(theme.FG)(` ${gitData.branch}`) : "";
     const dirty = gitData.branch ? (gitData.status?.dirty ? fg(theme.YELLOW)(` ●${gitData.status.dirty}`) : fg(theme.GREEN)(" ✓")) : "";
     const ab = gitData.branch && (ahead || behind) ? fg(theme.MUTE)(`${ahead ? ` ↑${ahead}` : ""}${behind ? ` ↓${behind}` : ""}`) : ""; // matches sidebar `aheadBehind`
-    status.content = t` ${fg(theme.FG)(shortenPath(cwd))} ${arrow}${branch}${dirty}${ab}  ${fg(theme.DIM)("│")}  ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
+    status.content = t` ${fg(theme.FG)(shortenPath(cwd))} ${arrow}${branch}${dirty}${ab}  ${fg(theme.DIM)("│")}  ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("think")} ${fg(theme.FG)(effort)}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
@@ -776,7 +779,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/help", "this help");
     cmd("/sessions", "browse sessions — ↑/↓ · Enter resume · d delete");
     cmd("/resume", "resume the last session");
-    cmd("/models", "switch model (interactive picker)");
+    cmd("/models", "switch model, then pick thinking effort");
+    cmd("/effort", "change thinking effort (off/low/medium/high/xhigh)");
     cmd("/mode", "toggle PLAN ↔ EDIT");
     cmd("/compact", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
@@ -814,6 +818,41 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     addText(() => t`  ${fg(theme.MUTE)("selection, Ctrl+Shift+C/V, and right-click are your terminal's")}`);
   }
 
+  // D52: thinking-effort picker — the levels the active model's provider supports, the current one marked.
+  function openEffortPicker(): void {
+    const efforts = PROVIDER_EFFORTS[active.provider];
+    openPicker({
+      title: `thinking effort · ${active.id} · ↑/↓ · Enter select · Esc close`,
+      items: efforts.map((e) => ({ label: e, desc: e === "off" ? "no thinking — fastest" : "reasoning effort", current: e === effort })),
+      onPick: (i) => {
+        effort = efforts[i]!;
+        setStatus(); // the effort shows in the status bar + the session panel
+      },
+    });
+  }
+
+  // /model → pick a model, then (D52) immediately pick its thinking effort. A model switch resets effort to
+  // that model's configured default; the chained effort picker lets you change it in the same flow.
+  function openModelPicker(): void {
+    openPicker({
+      title: "model · ↑/↓ · Enter select · Esc close",
+      items: models.map((m) => ({ label: m.id, desc: m.label, current: m.id === active.id })),
+      onPick: (i) => {
+        const entry = models[i]!;
+        try {
+          provider = providerFor(entry); // may throw if the key is missing — leave `active` unchanged then
+          active = entry;
+          effort = entryEffort(entry); // default effort for the newly-picked model
+          setStatus(); // the model id + effort (status bar + session panel) is the indicator
+          void refreshBalance();
+          openEffortPicker(); // then choose the effort — the user's "/model asks model, then effort" flow
+        } catch (e) {
+          sysErr(e instanceof Error ? e.message : String(e));
+        }
+      },
+    });
+  }
+
   async function runCommand(value: string): Promise<void> {
     const { name, args } = parseSlash(value);
     switch (name) {
@@ -839,22 +878,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         bottomView = bottomView === "git" ? "files" : "git"; // D49: toggle the git view (same as Ctrl+G)
         void refreshGit();
         return;
+      case "model":
       case "models":
-        openPicker({
-          title: "model · ↑/↓ · Enter select · Esc close",
-          items: models.map((m) => ({ label: m.id, desc: m.label, current: m.id === active.id })),
-          onPick: (i) => {
-            const entry = models[i]!;
-            try {
-              provider = providerFor(entry); // may throw if the key is missing — leave `active` unchanged then
-              active = entry;
-              setStatus(); // the model id (status bar + session panel) is the indicator
-              void refreshBalance();
-            } catch (e) {
-              sysErr(e instanceof Error ? e.message : String(e));
-            }
-          },
-        });
+        openModelPicker(); // D52: picks a model, then chains into the effort picker
+        return;
+      case "effort":
+        openEffortPicker(); // D52: change the current model's thinking effort
         return;
       case "balance":
         await refreshBalance();
@@ -1071,7 +1100,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         system: sys,
         tools: toolSpecs(mode === "plan"), // D39: PLAN advertises only PLAN-visible tools (read-only + bash)
         status: () => formatModelStatus(meter.snapshot(), active.contextWindow, currentTodos), // D43: ambient tail note
-        thinking: active.thinking ?? false,
+        effort,
         temperature: active.temperature,
         fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder
         onEvent: (ev) => {

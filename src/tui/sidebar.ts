@@ -11,6 +11,7 @@ import { trunc, shortenPath, displayPath } from "./format.ts";
 import type { GraphRow } from "../git.ts";
 import type { Theme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
+import type { Effort } from "../effort.ts";
 import type { Todo } from "../tools/types.ts";
 
 type Renderer = Awaited<ReturnType<typeof createCliRenderer>>;
@@ -24,6 +25,7 @@ export interface SidebarState {
   model: string;
   contextWindow?: number;
   mode: Mode;
+  effort: Effort; // D52: current thinking effort, shown on the mode row
   balance: Balance | null;
   usage: { costUsd: number; contextTokens: number };
   busy: boolean;
@@ -163,7 +165,8 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       sessionRows[1]!.height = 0;
     }
     sessionRows[2]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(s.model, W - 6))}`;
-    sessionRows[3]!.content = s.mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
+    const badge = s.mode === "edit" ? bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT ")) : bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "));
+    sessionRows[3]!.content = t`${fg(theme.MUTE)("mode  ")}${badge}  ${fg(theme.MUTE)("think ")}${fg(theme.FG)(s.effort)}`; // D52: mode + effort on one row
     sessionRows[4]!.content = t`${fg(theme.MUTE)("cost  ")}${fg(theme.FG)(formatCost(s.usage.costUsd))}`;
     sessionRows[5]!.content = t`${fg(theme.MUTE)("ctx   ")}${fg(theme.FG)(formatContext(s.usage.contextTokens, s.contextWindow))}`;
     sessionRows[6]!.content = t`${fg(theme.MUTE)("bal   ")}${fg(theme.GREEN)(formatBalance(s.balance))}`;

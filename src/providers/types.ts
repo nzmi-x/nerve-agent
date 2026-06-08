@@ -1,6 +1,7 @@
 // The one shared contract between the engine and the two providers (DeepSeek, Gemini).
 // Each client maps its native wire format onto these types and shares nothing else.
 // See docs/ARCHITECTURE_BRIEF.md §1 and docs/providers.md §0.
+import type { Effort } from "../effort.ts";
 
 /** A normalized streaming event — the only abstraction the loop, interceptors, and TUI see. */
 export type StreamEvent =
@@ -53,7 +54,8 @@ export interface ProviderRequest {
   messages: Message[];
   tools?: ToolSpec[];
   temperature?: number;
-  thinking?: boolean;
+  /** Thinking effort (D52). Provider-mapped: DeepSeek `reasoning_effort`/disable, Gemini `thinkingLevel`. */
+  effort?: Effort;
 }
 
 /** A provider speaks its API raw (fetch + SSE) and emits StreamEvents. Nothing else is shared. */

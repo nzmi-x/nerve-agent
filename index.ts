@@ -3,7 +3,8 @@
 // one-shot prompts (`-p "…"`) or a simple stdin REPL, streaming to stdout. See docs/manual/loop.md.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config.ts";
+import { loadModels, providerFor, selectModel, fallbacksFor, entryEffort } from "./src/config.ts";
+import type { Effort } from "./src/effort.ts";
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
@@ -83,7 +84,7 @@ const langTouched = new Set<string>(); // D24: sticky across turns (skill inject
 let langSkillText = "";
 let langSkillKey = "";
 
-async function runTurn(session: Session, entryId: string, thinking: boolean, temperature: number | undefined, provider: Provider, fallbacks: Candidate[], prevIssues?: string): Promise<void> {
+async function runTurn(session: Session, entryId: string, effort: Effort, temperature: number | undefined, provider: Provider, fallbacks: Candidate[], prevIssues?: string): Promise<void> {
   const ac = new AbortController();
   const onSigint = (): void => ac.abort();
   process.once("SIGINT", onSigint);
@@ -113,7 +114,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     signal: ac.signal,
     system: sys,
     tools: toolSpecs(mode === "plan"),
-    thinking,
+    effort,
     temperature,
     fallbacks, // D15: transient errors fall down the model ladder, then back off
     onEvent: (ev) => {
@@ -149,7 +150,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
   }
   session.addUser(triagePrompt(summaries)); // agent triages: fix critical/quick, defer non-critical
   out(`${DIM}↪ post-edit checks failed — agent triaging…${RESET}\n`);
-  await runTurn(session, entryId, thinking, temperature, provider, fallbacks, issueSummary);
+  await runTurn(session, entryId, effort, temperature, provider, fallbacks, issueSummary);
 }
 
 // --- boot -------------------------------------------------------------------
@@ -175,7 +176,7 @@ if (resume) {
   }
 }
 const session = new Session(resumeId ? { id: resumeId, resume: true } : {});
-const thinking = entry.thinking ?? false; // D11 kernel default: thinking off
+const effort = entryEffort(entry); // D52: the model's default effort (kernel default "off", D11)
 const fallbacks = fallbacksFor(models, entry); // D15 model ladder
 const lsp = noLsp ? undefined : new Lsp(process.cwd()); // D10: diagnostics-on-edit + the `lsp` tool
 await toolsReady; // D38: tools must be discovered before any toolSpecs()/dispatch read the registry
@@ -183,7 +184,7 @@ await toolsReady; // D38: tools must be discovered before any toolSpecs()/dispat
 if (prompt) {
   // one-shot
   session.addUser(prompt);
-  await runTurn(session, entry.id, thinking, entry.temperature, provider, fallbacks);
+  await runTurn(session, entry.id, effort, entry.temperature, provider, fallbacks);
   await session.close();
   await lsp?.stop();
 } else if (process.stdin.isTTY) {
@@ -205,7 +206,7 @@ if (prompt) {
       continue;
     }
     session.addUser(text);
-    await runTurn(session, entry.id, thinking, entry.temperature, provider, fallbacks);
+    await runTurn(session, entry.id, effort, entry.temperature, provider, fallbacks);
     out("> ");
   }
   await session.close();

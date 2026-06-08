@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { deepseek } from "./providers/deepseek.ts";
 import { gemini } from "./providers/gemini.ts";
 import { globalModelsPath } from "./paths.ts";
+import { modelEffort, type Effort } from "./effort.ts";
 import type { Provider } from "./providers/types.ts";
 import type { Candidate } from "./loop.ts";
 import type { Pricing } from "./usage.ts";
@@ -17,6 +18,10 @@ export interface ModelEntry {
   /** Mark the model subagents run on (D6) — the cheap profile. Falls back to `default` if none set. */
   subagent?: boolean;
   temperature?: number;
+  /** Default thinking effort (D52): off | low | medium | high | xhigh, within the provider's supported set
+   *  (see `PROVIDER_EFFORTS`). Unset → falls back to the legacy `thinking` boolean, then "off". */
+  effort?: Effort;
+  /** @deprecated use `effort`. Legacy boolean — true → "high", false → "off". */
   thinking?: boolean;
   /** Max context window in tokens — drives the context-used indicator. */
   contextWindow?: number;
@@ -80,7 +85,12 @@ export function fallbacksFor(models: ModelEntry[], active: ModelEntry): Candidat
   const out: Candidate[] = [];
   for (const m of models.slice(start + 1)) {
     const provider = tryProvider(m);
-    if (provider) out.push({ provider, model: m.id, thinking: m.thinking ?? false, temperature: m.temperature });
+    if (provider) out.push({ provider, model: m.id, effort: entryEffort(m), temperature: m.temperature });
   }
   return out;
+}
+
+/** A model's default thinking effort (D52) — its `effort`, the legacy `thinking` boolean, else "off". */
+export function entryEffort(entry: ModelEntry): Effort {
+  return modelEffort(entry.provider, entry.effort ?? entry.thinking);
 }
