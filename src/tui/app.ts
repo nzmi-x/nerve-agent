@@ -23,7 +23,7 @@ import * as interceptorsMod from "../interceptors.ts";
 import { bash } from "../tools/bash.ts";
 import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
-import { UsageMeter, formatCost, formatContext } from "../usage.ts";
+import { UsageMeter, formatCost, formatContext, formatModelStatus } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
 import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
@@ -917,6 +917,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         signal: ac.signal,
         system: sys,
         tools: toolSpecs(mode === "plan"), // D39: PLAN advertises only PLAN-visible tools (read-only + bash)
+        status: () => formatModelStatus(meter.snapshot(), active.contextWindow, currentTodos), // D43: ambient tail note
         thinking: active.thinking ?? false,
         temperature: active.temperature,
         fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder

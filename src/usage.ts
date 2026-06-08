@@ -2,6 +2,8 @@
 // latest turn's input as the current context occupancy. Pure (no I/O) so it's unit-tested. The TUI
 // feeds it from the loop's usage events and shows the result in the status line. See docs/manual/usage.md.
 
+import type { Todo } from "./tools/types.ts";
+
 /** USD per 1,000,000 tokens (from config/models.json). */
 export interface Pricing {
   input: number;
@@ -80,4 +82,22 @@ export function formatContext(contextTokens: number, window?: number): string {
   const used = formatTokens(contextTokens);
   if (!window) return used;
   return `${used}/${formatTokens(window)} (${Math.round((contextTokens / window) * 100)}%)`;
+}
+
+/** Clip to a short single-line label (the in-progress todo in the status line). */
+function clip(s: string, n = 48): string {
+  const line = (s.split("\n")[0] ?? "").trim();
+  return line.length > n ? `${line.slice(0, n - 1)}…` : line;
+}
+
+/** The ambient `[status]` line appended to the request tail (D43): the model's running spend, context
+ *  occupancy, and todo progress, so it can pace itself. Not a stop signal (see prompts/system.md). Pure. */
+export function formatModelStatus(snap: UsageSnapshot, window: number | undefined, todos: Todo[]): string {
+  const parts = [formatCost(snap.costUsd), `ctx ${formatContext(snap.contextTokens, window)}`];
+  if (todos.length) {
+    const done = todos.filter((t) => t.status === "completed").length;
+    const doing = todos.find((t) => t.status === "in_progress");
+    parts.push(`todos ${done}/${todos.length}${doing ? ` · doing: ${clip(doing.content)}` : ""}`);
+  }
+  return `[status] ${parts.join(" · ")}`;
 }

@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { UsageMeter, formatTokens, formatCost, formatContext } from "../src/usage.ts";
+import { UsageMeter, formatTokens, formatCost, formatContext, formatModelStatus } from "../src/usage.ts";
+import type { Todo } from "../src/tools/types.ts";
 
 const FLASH = { input: 0.14, output: 0.28 }; // USD / 1M
 
@@ -42,4 +43,26 @@ test("formatCost: cents, then sub-cent precision", () => {
 test("formatContext: used/window (pct), or just used when no window", () => {
   expect(formatContext(200_000, 1_000_000)).toBe("200k/1M (20%)");
   expect(formatContext(0)).toBe("0");
+});
+
+const snap = (costUsd: number, contextTokens: number) => ({ inputTokens: 0, outputTokens: 0, costUsd, contextTokens, turns: 1 });
+
+test("formatModelStatus: composes spend · context · todo progress (D43)", () => {
+  const todos: Todo[] = [
+    { content: "done thing", status: "completed" },
+    { content: "wire up the parser", status: "in_progress" },
+    { content: "later thing", status: "pending" },
+  ];
+  const out = formatModelStatus(snap(0.12, 45_000), 128_000, todos);
+  expect(out).toContain("[status]");
+  expect(out).toContain("$0.12");
+  expect(out).toContain("ctx 45k/128k (35%)");
+  expect(out).toContain("todos 1/3");
+  expect(out).toContain("doing: wire up the parser");
+});
+
+test("formatModelStatus: omits the todo segment when there are none", () => {
+  const out = formatModelStatus(snap(0, 1_000), undefined, []);
+  expect(out).not.toContain("todos");
+  expect(out).toContain("ctx 1k");
 });

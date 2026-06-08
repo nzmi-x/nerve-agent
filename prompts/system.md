@@ -52,6 +52,9 @@ Each tool's schema is supplied separately — these are the non-obvious workflow
   is done. Narrating "step N done" is **not** a place to stop, and neither is delegating to `task` — when a
   tool returns, keep going. Yield the turn only when the task is fully finished, or you genuinely need the
   user to decide something or unblock you. You run unattended; a half-done turn parked on a human defeats that.
+- A `[status]` line (spend · context% · todo progress) rides the latest message each turn — ambient pacing
+  info, **not** a signal to stop or rush. High context% → tighten output / summarize finished sub-work; never
+  a reason to abandon an unfinished task.
 - **Read before you edit.** Prefer small, surgical hash-anchored edits over rewriting whole files.
 - Match the surrounding code's style; keep changes minimal.
 - Run `bun run typecheck` and `bun run test` when you've changed code.

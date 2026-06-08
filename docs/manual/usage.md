@@ -19,6 +19,10 @@
   gauge stays the main thread's.
 - `formatTokens`/`formatCost`/`formatContext` produce status-line strings, e.g.
   `formatContext(200_000, 1_000_000)` → `"200k/1M (20%)"`.
+- `formatModelStatus(snapshot, window, todos)` ([D43](../DECISIONS.md)) composes the ambient `[status]` note
+  (`$spend · ctx used/window (N%) · todos done/total · doing: …`) the loop appends to the request **tail**
+  each turn (`withStatus` in `src/loop.ts`) so the model paces itself — tail-only keeps the cached prefix
+  byte-stable (idea 10). The TUI supplies the live meter + todos; headless omits it.
 
 **How to change it:**
 - Display lives here; the source of pricing/window is `config/models.json` (edit numbers there, not code).

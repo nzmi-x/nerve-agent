@@ -7,7 +7,7 @@ import { stopGuard } from "../src/interceptors.ts";
 import { Session } from "../src/session.ts";
 import { tools as registryTools, loadTools } from "../src/tools/registry.ts";
 import type { Tool } from "../src/tools/types.ts";
-import type { Provider, StreamEvent } from "../src/providers/types.ts";
+import type { Message, Provider, StreamEvent } from "../src/providers/types.ts";
 
 /** A provider that replays one scripted StreamEvent[] per turn. */
 function fakeProvider(turns: StreamEvent[][]): Provider {
@@ -70,6 +70,33 @@ test("loop: streams, dispatches a tool call, feeds the result back, and finishes
   expect(session.messages[3]!.content).toBe("Done.");
   expect(toolResults[0]).toContain("Wrote out.txt");
   expect(await Bun.file(join(dir, "out.txt")).text()).toBe("hi");
+  await session.close();
+});
+
+test("loop: an injected status note rides the last message, leaving the session unmutated (D43)", async () => {
+  let sent: Message[] = [];
+  const provider: Provider = {
+    name: "deepseek",
+    async *stream(req) {
+      sent = req.messages;
+      yield { type: "done", reason: "stop" };
+    },
+  };
+  const session = new Session({ id: "ST" });
+  session.addUser("hello");
+  await loop({
+    provider,
+    session,
+    model: "m",
+    mode: "edit",
+    ctx: { cwd: dir },
+    interceptors: [],
+    signal: new AbortController().signal,
+    status: () => "[status] $0.01 · ctx 5%",
+  });
+  expect(sent.at(-1)!.content).toBe("hello\n\n[status] $0.01 · ctx 5%"); // appended to the uncached tail
+  expect(session.messages[0]!.content).toBe("hello"); // user message unmutated by the ephemeral status
+  expect(session.messages.some((m) => m.content.includes("[status]"))).toBe(false); // status never persisted
   await session.close();
 });
 

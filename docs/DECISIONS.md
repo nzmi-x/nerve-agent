@@ -1088,6 +1088,31 @@ leaf — headless re-reads each turn; a mid-session TUI edit needs a restart, ac
 **Phase.** Built (delivers D37 idea 14). `src/context.ts` + `baseSystem` in `index.ts`; tests in
 `tests/context.test.ts`; manual at `docs/manual/context.md`. Reconciles the D12 drift (see D12's correction).
 
+## D43 — Model self-awareness: an ambient status note at the request tail (+ prefix hygiene)
+**Decision.** Each turn the loop appends an ephemeral `[status]` note — `$spend · ctx used/window (N%) · todos
+done/total · doing: <current>` — to the **last message's content** (not a new message: a standalone one would
+risk consecutive-`user` roles on Gemini, which collapses tool results into a `user` turn). The TUI fills it via
+a pure `status?: () => string` `LoopOptions` callback (`formatModelStatus` over the `UsageMeter` snapshot +
+`active.contextWindow` + live todos); headless omits it. `system.md` frames it as **pacing** info, never a stop
+signal. This realizes D37 ideas 4 **and** 10: no hard `--max-cost` cap (the loop already ends when the model
+stops calling tools — the model decides), and the note is **tail-only** so the cached prefix stays byte-stable.
+**Why (idea 4).** Per the user, never cap the agent — expose information and let it pace itself. The todo
+segment proactively counters the mid-plan drift D34 catches reactively (recency: the live task list resurfaces
+at the most-attended position each turn), reusing the sidebar's summary.
+**Why (idea 10).** Both providers auto-cache the longest common prefix (DeepSeek context cache; Gemini implicit
+cache), so the cost lever is **prefix stability**, not manual cache management. Invariant: volatile per-turn
+content (this status) lives at the **tail only** — never the system prompt or mid-history, which would bust the
+cache every turn; the spec order is sorted + stable (D38); the system base (`system.md` + project memory)
+carries no per-turn tokens; the message log is already append-only. So the heavy append-only split (idea 11)
+stays rejected — automatic caching + this discipline already capture the win.
+**Rejected.** A standalone trailing status *message* (consecutive-role hazard on Gemini without a provider-side
+merge); injecting the status into the system prompt (busts the prefix cache every turn — the exact anti-pattern
+idea 10 warns against); a hard cost cap / hiding cost from the model (D37 idea 4 — the user chose model-decides
+over a ceiling).
+**Phase.** Built (delivers D37 ideas 4 + 10). `formatModelStatus` in `src/usage.ts`; `status` seam + `withStatus`
+tail-append in `src/loop.ts`; wired in `src/tui/app.ts`; framing in `prompts/system.md`. Tests in
+`tests/usage.test.ts` + `tests/loop.test.ts`.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

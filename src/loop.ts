@@ -4,7 +4,7 @@
 import { pipe, type Interceptor } from "./stream.ts";
 import { dispatch, isReadOnlyTool, type Mode } from "./dispatch.ts";
 import { isTransient, isContextOverflow, backoffMs, sleep } from "./retry.ts";
-import type { Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec } from "./providers/types.ts";
+import type { Message, Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec } from "./providers/types.ts";
 import type { Session } from "./session.ts";
 import type { ToolContext } from "./tools/types.ts";
 
@@ -34,6 +34,9 @@ export interface LoopOptions {
   signal: AbortSignal;
   system?: string;
   tools?: ToolSpec[];
+  /** Ambient status note (D43) appended to the request tail each turn — a surface fills it from the usage
+   *  meter + todos so the model can pace itself. Empty/absent → nothing injected. Called fresh per turn. */
+  status?: () => string;
   thinking?: boolean;
   temperature?: number;
   /** Model-ladder fallbacks tried (delay 0) before backing off on a transient error (D15). */
@@ -72,7 +75,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
 
     const req: ProviderRequest = {
       model: cand.model,
-      messages: opts.session.messages,
+      messages: withStatus(opts.session.messages, opts.status?.()),
       ...(opts.system ? { system: opts.system } : {}),
       ...(opts.tools ? { tools: opts.tools } : {}),
       ...(cand.thinking !== undefined ? { thinking: cand.thinking } : {}),
@@ -150,6 +153,17 @@ export async function loop(opts: LoopOptions): Promise<void> {
     for (const call of calls.filter((c) => !isReadOnlyTool(c.name))) await run(call); // serial mutating phase
     for (const call of calls) opts.session.addToolResult(call.id, results.get(call.id) ?? "");
   }
+}
+
+/** Append an ephemeral `[status]` note (D43) to the LAST message's content, so it rides the uncached tail
+ *  (the cached prefix stays byte-stable, idea 10) without adding a role-ambiguous extra message — safe on
+ *  both providers. Returns a shallow copy; the session itself is never mutated. */
+function withStatus(messages: Message[], note: string | undefined): Message[] {
+  if (!note || messages.length === 0) return messages;
+  const out = messages.slice();
+  const last = out[out.length - 1]!;
+  out[out.length - 1] = { ...last, content: last.content ? `${last.content}\n\n${note}` : note };
+  return out;
 }
 
 function parseArgs(s: string): Record<string, unknown> {
