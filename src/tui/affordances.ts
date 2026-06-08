@@ -23,12 +23,15 @@ export interface Skill extends CommandInfo {
 
 export const BUILTIN_COMMANDS: CommandInfo[] = [
   { name: "help", description: "Show commands and keybindings" },
-  { name: "models", description: "Switch model (interactive picker)" },
+  { name: "models", description: "Switch model, then pick thinking effort" },
+  { name: "effort", description: "Change thinking effort (off/minimal/low/medium/high/xhigh)" },
   { name: "mode", description: "Toggle PLAN ↔ EDIT" },
+  { name: "git", description: "Swap the sidebar's files ↔ git view (Ctrl+G)" },
   { name: "clear", description: "Clear the transcript (keeps the session)" },
   { name: "compact", description: "Summarize old turns to free up context" },
   { name: "reload", description: "Hot-swap tools + interceptors from disk (Ctrl+R)" },
   { name: "drop", description: "Delete this session and start a fresh one" },
+  { name: "balance", description: "Refresh the provider balance" },
   { name: "resume", description: "Resume the last session" },
   { name: "sessions", description: "Browse sessions — resume or delete (interactive)" },
   { name: "exit", description: "Exit nerve" },

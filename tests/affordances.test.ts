@@ -59,6 +59,10 @@ test("slashSuggestions: prefix-matches builtins and skills", () => {
   expect(names("dr")).toEqual(["drop"]);
   expect(names("op")).toEqual(["opentui"]); // a skill
   expect(names("")).toContain("help");
+  // every interactive builtin must be discoverable, else `/x` looks like it doesn't exist (D52 /effort gap)
+  expect(names("eff")).toEqual(["effort"]);
+  expect(names("git")).toEqual(["git"]);
+  expect(names("bal")).toEqual(["balance"]);
 });
 
 test("parseSlash: splits name + args", () => {
