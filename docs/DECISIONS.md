@@ -1369,6 +1369,26 @@ Manual: `tools.md`.
 
 ---
 
+## D55 — Ground the model in the OS; surface missing optional deps (Fedora)
+**Decision.** Two environment-awareness fixes, both assuming **Fedora Linux** (nerve's target):
+1. **`<environment>` block in the system prompt** (`baseSystem` → `environmentContext`): states the OS
+   (`/etc/os-release` PRETTY_NAME + `process.platform`), the project cwd, **nerve's own source dir**
+   (`nerveSourceRoot()`, reachable via `self:`), the shell, and the date — and explicitly *"POSIX paths,
+   never assume Windows / invent `C:\…`"*. DeepSeek otherwise assumes a Windows box and, asked about nerve,
+   searches a made-up Windows path. Stating nerve's real path + the `self:` prefix grounds it.
+2. **Optional-dep hints** (`src/toolchain.ts` `OPTIONAL_DEPS`/`missingOptional`/`optionalHints`): tools a
+   feature needs but can run without — currently a **headless browser** for `fetch`'s SPA rendering (D54).
+   Shown with a **Fedora `sudo dnf install …`** hint: a `⚠ optional:` line under the TUI welcome, and on
+   stderr for headless runs. *Required* deps (shell, git) stay fatal in `preflight`; optional ones only hint,
+   never block. LSP servers + language-pack formatters aren't here — they're hinted at use-time (D10/D24).
+**Why.** The model kept inventing Windows paths (it had no OS context), and a missing browser silently
+disabled SPA rendering (D54) with no install hint. Both are "tell them what they need to know."
+**Phase.** Built. `environmentContext`/`osPretty` + `baseSystem` in `index.ts`; `OPTIONAL_DEPS`/
+`missingOptional`/`optionalHints` in `src/toolchain.ts`; hints shown in `app.ts` (TUI) + `index.ts` (headless).
+Tests: `tests/toolchain.test.ts`. Manual: `context.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a

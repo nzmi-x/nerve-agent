@@ -13,7 +13,8 @@
   `gemini` are wired now. `fallbacksFor(models, active)` builds the [D15](../DECISIONS.md) ladder from
   catalog entries after `active` that are usable (implemented provider + key present).
 - `index.ts` (the kernel runner) boots: **`preflight()`** (exit if a required external dep — the shell
-  or `git` — is missing on PATH) → `loadModels → selectModel → providerFor`, builds a `Session`
+  or `git` — is missing on PATH; *optional* deps like a headless browser only **hint** via `optionalHints`,
+  Fedora `dnf` — D55, shown in the TUI welcome / headless stderr) → `loadModels → selectModel → providerFor`, builds a `Session`
   (or resumes), reads `prompts/system.md`, and drives `loop` — one-shot with `-p "…"` or a stdin REPL,
   streaming to stdout (reasoning dimmed). Flags: `-p/--print`, `--model <id>`, `--mode plan|edit`
   (default edit), `--resume <id>|last`. `--resume last` = newest session by mtime (`src/sessions.ts`).

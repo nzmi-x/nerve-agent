@@ -7,7 +7,8 @@ import { loadModels, providerFor, selectModel, fallbacksFor, entryEffort } from 
 import type { Effort } from "./src/effort.ts";
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
-import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
+import { ensureLayout, skillRoots, commandRoots, nerveSourceRoot } from "./src/paths.ts";
+import { optionalHints } from "./src/toolchain.ts";
 import { loadProjectMemory, nestedMemory } from "./src/context.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
@@ -38,10 +39,35 @@ function systemPrompt(): string {
   return existsSync(p) ? readFileSync(p, "utf8") : "You are nerve, a terminal coding agent.";
 }
 
-/** The base system prompt = nerve's own `system.md` + the project/user memory files (CLAUDE.md/AGENTS.md,
- *  D42 delivering D12), layered in. Read fresh so an edited memory file hot-swaps. */
+/** The host OS pretty name (e.g. "Fedora Linux 44 …"), or the bare platform if `/etc/os-release` is absent. */
+function osPretty(): string {
+  try {
+    const m = /PRETTY_NAME="?([^"\n]+)"?/.exec(readFileSync("/etc/os-release", "utf8"));
+    if (m) return m[1]!;
+  } catch {
+    /* not linux / no os-release */
+  }
+  return process.platform;
+}
+
+/** Ground the model in WHERE it's running (D55) — DeepSeek otherwise assumes Windows and invents Windows
+ *  paths to nerve. States the OS, the project cwd, and nerve's real source dir (reachable via `self:`). */
+function environmentContext(cwd: string): string {
+  return [
+    "<environment>",
+    `Operating system: ${osPretty()} — a ${process.platform} machine. Paths are POSIX (forward slashes). Never assume Windows or invent Windows-style paths (no \`C:\\…\`).`,
+    `Working directory (the user's project): ${cwd}`,
+    `nerve's own source lives at: ${nerveSourceRoot()} — to read or edit nerve itself use the \`self:\` path prefix (e.g. \`self:src/loop.ts\`), never a guessed path.`,
+    `Shell: ${Bun.env.SHELL || "sh"}`,
+    `Today's date: ${new Date().toISOString().slice(0, 10)}`,
+    "</environment>",
+  ].join("\n");
+}
+
+/** The base system prompt = nerve's own `system.md` + a live `<environment>` block (D55) + the project/user
+ *  memory files (CLAUDE.md/AGENTS.md, D42 delivering D12), layered in. Read fresh so an edit hot-swaps. */
 function baseSystem(cwd: string): string {
-  return [systemPrompt(), loadProjectMemory(cwd)].filter(Boolean).join("\n\n");
+  return [systemPrompt(), environmentContext(cwd), loadProjectMemory(cwd)].filter(Boolean).join("\n\n");
 }
 
 function compactionPrompt(): string {
@@ -180,6 +206,9 @@ const effort = entryEffort(entry); // D52: the model's default effort (kernel de
 const fallbacks = fallbacksFor(models, entry); // D15 model ladder
 const lsp = noLsp ? undefined : new Lsp(process.cwd()); // D10: diagnostics-on-edit + the `lsp` tool
 await toolsReady; // D38: tools must be discovered before any toolSpecs()/dispatch read the registry
+
+// Optional-dep hints (D55) for headless runs — the TUI surfaces its own (preflight stderr is wiped by it).
+if (prompt || !process.stdin.isTTY) for (const h of optionalHints()) console.error(`nerve: optional — ${h}`);
 
 if (prompt) {
   // one-shot

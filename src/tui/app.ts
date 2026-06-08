@@ -37,6 +37,7 @@ import { listSessions, lastSessionId, sessionExists, deleteSession } from "../se
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel, displayPath, shortenPath } from "./format.ts";
 import { herdrReport } from "../herdr.ts";
+import { optionalHints } from "../toolchain.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider, ImageInput } from "../providers/types.ts";
@@ -1404,6 +1405,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
 
   if (session.title) transcriptBox.title = ` ◆ ${session.title} `; // resumed session keeps its title
   addText(() => t`${fg(theme.ACCENT)("✦")} ${fg(theme.MUTE)("welcome to nerve")} ${fg(theme.DIM)("· /help for commands")}`);
+  for (const h of optionalHints()) addText(() => t`${fg(theme.YELLOW)("⚠")} ${fg(theme.MUTE)("optional:")} ${fg(theme.DIM)(h)}`); // D55: missing optional deps + Fedora install hint
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();

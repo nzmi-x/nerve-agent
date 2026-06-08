@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { installHint } from "../src/toolchain.ts";
+import { installHint, missingOptional, optionalHints } from "../src/toolchain.ts";
 
 test("installHint: chains the package-manager install when it's also missing", () => {
   // uv present → just the install
@@ -15,4 +15,16 @@ test("installHint: chains the package-manager install when it's also missing", (
   expect(noBun).toContain("bun.sh/install");
   // an unknown package manager is left as-is
   expect(installHint("go install golang.org/x/tools/gopls@latest", () => false)).toBe("`go install golang.org/x/tools/gopls@latest`");
+});
+
+test("missingOptional / optionalHints: a browser satisfies fetch's SPA rendering; absent → a Fedora hint (D55)", () => {
+  // any chrome-family binary present → nothing missing
+  expect(missingOptional((c) => c === "google-chrome")).toEqual([]);
+  expect(missingOptional((c) => c === "chromium")).toEqual([]);
+  // none present → the browser dep is missing, with a `sudo dnf install` hint
+  const none = missingOptional(() => false);
+  expect(none).toHaveLength(1);
+  expect(none[0]!.install).toBe("sudo dnf install chromium");
+  expect(optionalHints(() => false)[0]).toContain("install: sudo dnf install chromium");
+  expect(optionalHints((c) => c === "chromium")).toEqual([]);
 });

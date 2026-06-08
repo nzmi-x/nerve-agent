@@ -113,7 +113,7 @@ export const fetchTool: Tool = {
         const md = htmlToMarkdown(await renderPage(url)).trim();
         return `${url}\n\n${md || "(rendered, but no readable content)"}`;
       } catch (e) {
-        return `Error rendering ${url}: ${e instanceof Error ? e.message : String(e)} — no headless browser? (install Chrome/Chromium)`;
+        return `Error rendering ${url}: ${e instanceof Error ? e.message : String(e)} — no headless browser found? install one: \`sudo dnf install chromium\``;
       }
     }
 
