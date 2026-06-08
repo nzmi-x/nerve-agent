@@ -1260,6 +1260,30 @@ render are load-verified (no TTY in CI).
 
 ---
 
+## D51 — herdr integration: report nerve's state to the herdr multiplexer (Stage 1)
+**Decision.** nerve reports its lifecycle state — `working` / `idle` / `blocked` / `done` — to
+[herdr](https://github.com)'s Unix control socket, so herdr's sidebar shows nerve's real-time status beside
+its other agents. `src/herdr.ts` `herdrReport(state)` is **implicit telemetry, not a tool** (the model never
+drives it): a **no-op unless `$HERDR_PANE_ID` is set** (herdr sets it in panes it spawns), it `Bun.connect`s
+to `$HERDR_SOCKET_PATH` (or `~/.config/herdr/herdr.sock`), writes **one newline-delimited JSON-RPC line**
+(`pane.report_agent`), and is **fire-and-forget** — the promise is never awaited and its rejection swallowed
+(herdr may be down). Hooks in `app.ts`: turn start→`working`, turn end→`idle`, `ask_user`→`blocked`
+(answered→`working`), ESC→`idle`, `/compact`→`working`/`idle`, shutdown→`done` (sent first, before the
+teardown awaits).
+**Why.** herdr already auto-detects nerve by process name + terminal output, but can't tell `working` from
+`idle`. A ~50-line socket reporter closes that gap for anyone who runs nerve under herdr, at zero cost to
+everyone who doesn't (the `$HERDR_PANE_ID` guard). This was the graduated [PLANS.md](PLANS.md) spec.
+**Charter fit.** This is **not** MCP/ACP/A2A (intentionally excluded) — it's one-way, opt-in, fire-and-forget
+status telemetry over a local Unix socket, with no model surface and no protocol coupling. It can't block or
+fail a turn.
+**Rejected / deferred.** Making it a tool (it's implicit, not model-driven); blocking the turn on socket I/O
+(fire-and-forget only); Stages 2–4 (custom status labels, a shareable `herdr` skill, native herdr-side
+session restore) — deferred until a real need appears.
+**Phase.** Built (Stage 1). `src/herdr.ts` + 7 hook sites in `src/tui/app.ts`. Tests: `tests/herdr.test.ts`
+(path resolution + message shape — no socket needed). Manual at `docs/manual/herdr.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a

@@ -35,6 +35,7 @@ import { gitBranch, gitStatus, gitGraph, type GitStatus, type GraphRow } from ".
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel, displayPath, shortenPath } from "./format.ts";
+import { herdrReport } from "../herdr.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider } from "../providers/types.ts";
@@ -548,6 +549,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     return new Promise((resolve) => {
       const rec = req.options.findIndex((o) => o.recommended);
       asking = { req, sel: rec >= 0 ? rec : 0, resolve };
+      herdrReport("blocked"); // herdr telemetry: waiting on the human (ask_user picker)
       renderAsk();
     });
   }
@@ -627,6 +629,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     aborting = false;
     busy = true;
     setStatus();
+    herdrReport("working"); // herdr telemetry: compaction is a working turn
     const note = addText(() => t`${fg(theme.MAGENTA)("✦")} ${fg(theme.MUTE)("compacting…")}`);
     turnAbort = new AbortController();
     try {
@@ -641,6 +644,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       busy = false;
       turnAbort = null;
       setStatus();
+      herdrReport("idle"); // herdr telemetry: compaction done
       drainRetheme(); // D30
     }
   }
@@ -884,6 +888,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     aborting = false; // fresh turn → the indicator reads "working", never a stale "stopping…" (the timer used to reset this)
     busy = true;
     setStatus();
+    herdrReport("working"); // herdr telemetry: a turn is now running
     if (lines.length > 1) {
       // not the first turn → a faint divider + breathing room separates this exchange from the last
       spacer();
@@ -900,6 +905,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
+    herdrReport("idle"); // herdr telemetry: the exchange is done
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     void refreshGit(); // D49: reflect any commit/branch/file changes the turn made
     // Let this turn's tools/subagents linger a moment, then auto-hide them (transient, not a forever log).
@@ -1143,6 +1149,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
+    herdrReport("done"); // herdr telemetry: nerve is exiting (fire-and-forget, before the awaits below)
     turnAbort?.abort();
     clearTransient(); // cancel the pending tools/subagents auto-hide (no render after destroy)
     themeMonitor?.kill(); // stop following the system theme (D30)
@@ -1194,6 +1201,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         asking = null;
         setPopup([]);
         a.resolve(a.req.options[a.sel]!.label);
+        herdrReport("working"); // herdr telemetry: human answered → the turn resumes
         return;
       }
       if (picker) {
@@ -1279,6 +1287,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       aborting = true; // flip the indicator to red "stopping…" immediately so ESC visibly registers
       turnAbort.abort();
       steerQueue.length = 0; // D46: ESC means stop — drop any queued steering too
+      herdrReport("idle"); // herdr telemetry: user interrupted the turn
       if (sidebar.visible) sidebar.setActivity(t`${activityChunk()}`);
       else setStatus();
     }

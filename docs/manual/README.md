@@ -44,6 +44,8 @@ of the implementation.
 | `lsp` | language-server client + diagnostics | `src/lsp/` |
 | `context` | CLAUDE.md layering + skills discovery | `src/context.ts` |
 | `config` | `.env` keys + `config/*.json` loading | `src/config.ts` |
+| `git` | sidebar git view + inline agent-edit diffs | `src/git.ts`, `src/diff.ts` |
+| `herdr` | report nerve state to the herdr multiplexer | `src/herdr.ts` |
 
 Top-level `docs/` (architecture, decisions, agent-rules, providers) are also reachable via the
 `manual` tool by name — the manual is a single lookup over the whole corpus.
