@@ -4,7 +4,7 @@
 inline agent-edit diff.
 **What:** the always-on cwd/branch panel, the `Ctrl+G` git view (a `git log --graph` of how branches relate),
 and the +/- diff shown when the agent edits a file.
-**Code:** `src/git.ts` (read-only git) · `src/diff.ts` (line differ) · `shortenPath` in `src/tui/format.ts` ·
+**Code:** `src/git.ts` (read-only git) · `src/diff.ts` (line differ) · `shortenPath`/`displayPath` in `src/tui/format.ts` ·
 `src/tui/sidebar.ts` (panels) · `src/tui/app.ts` (`renderEditDiff`/`refreshGit`/Ctrl+G)
 (tests: `tests/git.test.ts`, `tests/diff.test.ts`, `tests/format.test.ts`)
 

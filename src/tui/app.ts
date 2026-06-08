@@ -34,7 +34,7 @@ import { diffRows, diffStat } from "../diff.ts";
 import { gitBranch, gitStatus, gitGraph, type GitStatus, type GraphRow } from "../git.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
-import { firstLine, trunc, rel } from "./format.ts";
+import { firstLine, trunc, rel, displayPath } from "./format.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider } from "../providers/types.ts";
@@ -980,7 +980,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     // D49: render an inline +/- diff of an agent edit (like Claude Code) — display-only; the model still gets
     // the tool's text result, and onToolResult skips the generic line for a successful edit/write.
     const renderEditDiff = (path: string, oldText: string, newText: string): void => {
-      const rp = path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
+      const rp = displayPath(path, cwd);
       const { added, removed } = diffStat(oldText, newText);
       // filename header (bold path) + colored +a/-b stat
       addText(

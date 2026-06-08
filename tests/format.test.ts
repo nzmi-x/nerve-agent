@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { firstLine, trunc, rel, shortenPath } from "../src/tui/format.ts";
+import { firstLine, trunc, rel, shortenPath, displayPath } from "../src/tui/format.ts";
 
 test("firstLine: takes line one and clips at 120 cols", () => {
   expect(firstLine("hello\nworld")).toBe("hello");
@@ -31,4 +31,19 @@ test("shortenPath: home → ~, deep paths keep the last 3 with a leading …/", 
   expect(shortenPath("/home/naz", "/home/naz")).toBe("~");
   expect(shortenPath("/usr/local/share/foo/bar", "")).toBe("…/share/foo/bar");
   expect(shortenPath("/a/b", "")).toBe("/a/b");
+});
+
+test("displayPath: picks the shortest of cwd-relative / ~ / absolute", () => {
+  const cwd = "/home/naz/Documents/nerve";
+  const home = "/home/naz";
+  // in-workspace → cwd-relative (shortest)
+  expect(displayPath("/home/naz/Documents/nerve/src/x.ts", cwd, home)).toBe("src/x.ts");
+  // /tmp is short absolute — must NOT become ../../../../tmp/x.txt (the bug in the screenshot)
+  expect(displayPath("/tmp/test.txt", cwd, home)).toBe("/tmp/test.txt");
+  // a system path outside home stays absolute, not a deep ../ climb
+  expect(displayPath("/etc/hosts", cwd, home)).toBe("/etc/hosts");
+  // under home but outside cwd → ~-relative beats both ../.. and absolute
+  expect(displayPath("/home/naz/Pictures/x.png", cwd, home)).toBe("~/Pictures/x.png");
+  // a near sibling → ../sib/x.ts wins over the longer ~ / absolute forms
+  expect(displayPath("/home/naz/Documents/other/x.ts", cwd, home)).toBe("../other/x.ts");
 });

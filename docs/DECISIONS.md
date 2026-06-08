@@ -1210,6 +1210,10 @@ should see).
    tiny zero-dep LCS line differ, `src/diff.ts`) as **colored, line-numbered +/- rows** under a bold filename
    header, replacing the verbose "Applied N edits" line **in the UI only**. The model's tool result (anchors +
    diagnostics) is unchanged; the engine/loop is untouched (`onFileChange` is a ctx hook like `setTodos`/D6).
+
+Both the files panel and the edit-diff header render paths via **`displayPath`** (`src/tui/format.ts`) — the
+shortest of the file's cwd-relative, `~`-relative, and absolute forms — so an out-of-workspace file like
+`/tmp/test.txt` shows as `/tmp/test.txt`, not `../../../../tmp/test.txt`, and a home file as `~/Pictures/x`.
 **Why.** nerve surfaced *where you are*, the project's *git state*, and *what the agent changed* nowhere — the
 last especially (only a text "Applied N edits"). The user wanted a starship-like dir+branch, a glanceable git
 view (their idea: reuse the files slot), and to *see* the agent's edits. `git diff` is the wrong tool for the

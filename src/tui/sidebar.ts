@@ -5,10 +5,9 @@
 // accents. The bottom flex-grow slot holds EITHER files or git (D49) — `bottomView` toggles it (Ctrl+G).
 // Hidden (width 0) below SIDEBAR_MIN cols or when toggled off — methods no-op then.
 import { BoxRenderable, TextRenderable, createCliRenderer, t, fg, bg } from "@opentui/core";
-import { relative } from "node:path";
 import { formatCost, formatContext } from "../usage.ts";
 import { formatBalance, type Balance } from "../balance.ts";
-import { trunc, shortenPath } from "./format.ts";
+import { trunc, shortenPath, displayPath } from "./format.ts";
 import type { GraphRow } from "../git.ts";
 import type { Theme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
@@ -255,7 +254,7 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       const tr = fileRows[i]!;
       if (i < Math.min(files.length, cap)) {
         const f = files[i]!;
-        const name = trunc(relative(s.cwd, f) || f, W - 2);
+        const name = trunc(displayPath(f, s.cwd), W - 2);
         tr.content = s.sessionEdited.has(f) ? t`${fg(theme.YELLOW)("✎")} ${fg(theme.FG)(name)}` : t`${fg(theme.DIM)("·")} ${fg(theme.MUTE)(name)}`;
         tr.height = 1;
       } else {
