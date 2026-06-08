@@ -1,6 +1,6 @@
 # CLAUDE.md — operating guide for agents working on `nerve`
 
-`nerve` is a lean, self-hackable **coding agent** for **Gemini and DeepSeek only**.
+**Nerve Agent** (CLI command + short name: `nerve`) is a lean, self-hackable **coding agent** for **Gemini and DeepSeek only**.
 Before changing anything, read [AGENT_RULES.md](../docs/AGENT_RULES.md) (the non-negotiables),
 [ARCHITECTURE_BRIEF.md](../docs/ARCHITECTURE_BRIEF.md) (how the pieces fit), and [DECISIONS.md](../docs/DECISIONS.md)
 (what was decided and why). Keep the codebase small. **Record any new design decision in

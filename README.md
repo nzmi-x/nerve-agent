@@ -1,8 +1,8 @@
-# nerve
+# Nerve Agent
 
 A bespoke, single-developer AI agent harness. Lean enough to hold in your head, transparent enough that the agent running *inside* it can safely refactor its own machinery mid-session.
 
-> **nerve** — because the whole point is to *feel every token* as it streams, and to splice into the wire mid-thought.
+> **Nerve Agent** — because the whole point is to *feel every token* as it streams, and to splice into the wire mid-thought. (The CLI command stays `nerve`.)
 
 ## What this is (and isn't)
 
