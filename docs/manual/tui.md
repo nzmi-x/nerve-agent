@@ -21,7 +21,9 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   `renderTodoPanel`), since the sidebar carries a 1-line summary; a turn that **ends with todos unfinished**
   triggers a **bounded auto-continue** ([D34](../DECISIONS.md)) — nerve re-prompts the model to keep going
   (≤8 rounds, stops on no progress / ESC) and prints a dim `· N todos still pending` hint only once it gives
-  up with work left) · a `popup` `Box` (autosuggest
+  up with work left; type **while it runs** to **queue a steer** ([D46](../DECISIONS.md)) — the status shows
+  `↳N queued` and the message injects as a user turn between turns, preempting auto-continue; ESC drops it) ·
+  a `popup` `Box` (autosuggest
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**

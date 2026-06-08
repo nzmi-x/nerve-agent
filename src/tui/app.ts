@@ -102,6 +102,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let mode: Mode = opts.mode;
   let busy = false;
   let aborting = false; // ESC pressed during a turn — show "stopping…" until the turn actually ends
+  const steerQueue: string[] = []; // D46: messages typed mid-turn — injected as user turns between turns (steering)
   let spin = 0; // activity-spinner frame (animated while busy, so the user can see the agent is alive)
   let turnAbort: AbortController | null = null;
   let lineId = 0;
@@ -534,7 +535,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const setStatus = (): void => {
     const s = meter.snapshot();
     const badge = mode === "edit" ? bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT ")) : bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "));
-    status.content = t` ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${busy ? activityChunk(true) : ""}`;
+    status.content = t` ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
@@ -797,13 +798,21 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const raw = value.trim();
     input.setText("");
     clearSuggest();
-    if (!raw || busy) {
+    if (!raw) {
       pastes.clear();
       pasteSeq = 0;
       return;
     }
     const expanded = expandPastes(raw, pastes); // restore any surviving "[Pasted N lines #id]" tokens (also clears the stash)
     pasteSeq = 0;
+    if (busy) {
+      // Mid-turn (D46): queue a plain prompt as steering — injected as a user turn once the current turn
+      // finishes (a redirect without a hard ESC abort). Shell/commands aren't queued (they act now or not).
+      if (raw.startsWith("!") || raw.startsWith("/")) return void sysInfo("busy — finish the turn first (ESC aborts)");
+      steerQueue.push(expanded);
+      setStatus(); // surface "↳N queued" in the status line (no transcript line — would split the live stream)
+      return;
+    }
     if (raw.startsWith("!")) return void runShell(expanded.slice(1));
     if (raw.startsWith("/")) return void runCommand(raw); // commands run literally (paste tokens pass through)
     await sendPrompt(expanded, () => t`${bold(fg(theme.GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
@@ -824,12 +833,29 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     spacer(); // breathing room before the assistant's answer
     session.addUser(modelText);
     await runAgentTurn();
+    await drainSteer(); // D46: a redirect typed during the turn preempts auto-continue
     await autoContinue(); // D34: drive an unfinished todo list to completion (bounded), then flag any remainder
+    await drainSteer(); // D46: catch a redirect typed during the last auto-continue round
     void titleSession(); // D26: name the session from its first exchange (no-op once titled)
     busy = false;
     setStatus();
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     input.focus();
+  }
+
+  // D46: inject messages the user queued mid-turn (steering) as user turns — a redirect without a hard ESC
+  // abort. Drains the whole queue (a steer can queue more); each runs a turn. Policy lives here, like D34;
+  // the engine `loop` stays pure. ESC clears the queue (see the key handler).
+  async function drainSteer(): Promise<void> {
+    while (steerQueue.length && !turnAbort?.signal.aborted) {
+      const msg = steerQueue.shift()!;
+      setStatus(); // clear the queued count as we consume it
+      spacer();
+      addText(() => t`${bold(fg(theme.YELLOW)("↳"))} ${msg}`); // echo the steer (between turns → no live stream to split)
+      spacer();
+      session.addUser(msg);
+      await runAgentTurn();
+    }
   }
 
   // D34: keep an unfinished todo list moving without a human nudge (nerve runs unattended, D11). A cheap
@@ -839,6 +865,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const MAX_AUTO_CONTINUE = 8;
   async function autoContinue(): Promise<void> {
     for (let round = 0; round < MAX_AUTO_CONTINUE; round++) {
+      if (turnAbort?.signal.aborted) return;
+      await drainSteer(); // D46: a queued redirect preempts this round's auto-continue nudge
       if (turnAbort?.signal.aborted) return;
       const total = currentTodos.length;
       const doneBefore = currentTodos.filter((td) => td.status === "completed").length;
@@ -1145,6 +1173,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (key.name === "escape" && busy && turnAbort) {
       aborting = true; // flip the indicator to red "stopping…" immediately so ESC visibly registers
       turnAbort.abort();
+      steerQueue.length = 0; // D46: ESC means stop — drop any queued steering too
       if (sidebar.visible) sidebar.setActivity(t`${activityChunk()}`);
       else setStatus();
     }

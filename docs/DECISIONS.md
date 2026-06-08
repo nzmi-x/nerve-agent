@@ -471,8 +471,7 @@ so they aren't re-proposed without new information:
   ([D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count)). Cheap; not load-bearing
   for the kernel, so it waits until self-hosting exercises long tasks.
 - **Queued / steering input** (type the next instruction while streaming; `followUp`/`steer`) —
-  *defer.* Nice TUI UX, pure front-end (a pending-message buffer), no engine change. Add during a
-  TUI-polish pass.
+  *defer → **built as D46**.* Nice TUI UX, pure front-end (a pending-message buffer), no engine change.
 - **Handoff** (summarize → brand-new session) — *defer in favour of [D17](#d17--context-maintenance-lean-compaction--tool-output-pruning).*
   Overlaps compaction; pick one first. Revisit if "fresh session, carried context" becomes a real need.
 - **Session tree / `/branch` / `/tree`** — *defer (heavy).* Turns the linear append-only JSONL
@@ -1137,6 +1136,24 @@ no-op (both synchronous), so the only real overlap available is the tool-discove
 **Rejected.** Pre-spawning LSP servers (fights lazy-per-language, D10; wasteful for unused languages);
 pre-warming the session DB (already opened at `Session` construction).
 **Phase.** Built (`index.ts` boot). Delivers D37 idea 12.
+
+## D46 — Between-turn steering: queue a mid-turn redirect (idea 6)
+**Decision.** A message typed **while the agent is working** is queued (not discarded, not a hard abort) and
+injected as a user turn **between** turns — after the current response, preempting D34's auto-continue. Pure
+TUI policy in `app.ts` (a `steerQueue` + `drainSteer()`), mirroring D34; the engine `loop` stays pure. The
+status line shows `↳N queued`; `drainSteer` echoes each steer (`↳ <msg>`) as it injects it; **ESC drops the
+queue** (stop means stop). Shell/`/`-commands aren't queued (they act now or not at all). Promotes D20's
+deferred "Queued / steering input."
+**Why.** ESC aborts the whole turn and loses the in-flight work; to redirect you had to abort + retype. For
+unattended D34 runs especially, queuing a redirect that lands at the next turn boundary lets you nudge the
+agent off a wrong path without throwing away progress. "Between-turn" (not true mid-turn): injecting inside the
+serial mutating phase would race half-applied edits — letting the current turn's tools finish is the safe 90%.
+**Rejected.** Interrupting mid-tool (racy against the edit phase); aborting on new input (that's ESC — loses
+work); a separate engine-level steer hook (policy belongs in `app.ts`; the loop stays re-entrant + pure, D6); a
+transcript line on queue (would split the live stream — the status `↳N queued` is the signal instead).
+**Phase.** Built — `app.ts` (`steerQueue`/`drainSteer`, drained in `sendPrompt` + each `autoContinue` round;
+ESC clears it). TUI-only (headless is one-shot). Interactive flow is typecheck- + load-verified and patterned
+on D34; not unit-tested (TUI policy, like D34). Delivers D37 idea 6.
 
 ---
 
