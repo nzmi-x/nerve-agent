@@ -46,11 +46,28 @@ export interface SidebarState {
   termHeight: number;
 }
 
+/** The ordered panel ids that should sit in the layout for this state — the others have no value yet, so we
+ *  hide them entirely (a bordered box can't collapse to height 0, so "hide" = drop it from the layout). cwd +
+ *  session are always present; tools/subagents are transient (app.ts clears them between exchanges). Pure +
+ *  exported so the visibility rules are unit-testable without a renderer. */
+export function panelLayout(
+  s: Pick<SidebarState, "todos" | "skills" | "lspServers" | "tools" | "subagents" | "files" | "bottomView">,
+): string[] {
+  const ids = ["cwdPanel", "sessionPanel"];
+  if (s.todos.length) ids.push("todosPanel");
+  if (s.skills.length) ids.push("skillsPanel");
+  if (s.lspServers.length) ids.push("lspPanel");
+  if (s.tools.length) ids.push("toolsPanel");
+  if (s.subagents.length) ids.push("subagentsPanel");
+  if (s.bottomView === "git") ids.push("gitPanel"); // user toggled it on (Ctrl+G) — show even if empty
+  else if (s.files.length) ids.push("filesPanel"); // default bottom, but only once a file is touched
+  return ids;
+}
+
 export interface Sidebar {
   readonly box: BoxRenderable;
   readonly visible: boolean;
   render(s: SidebarState): void;
-  renderTodoSummary(todos: Todo[]): void;
   setActivity(chunk: Content): void;
   setVisible(visible: boolean): void;
   retheme(): void;
@@ -77,20 +94,29 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
   const lspPanel = mkPanel("lspPanel", " lsp ", () => theme.ACCENT);
   const toolsPanel = mkPanel("toolsPanel", " tools ", () => theme.GREEN);
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => theme.YELLOW);
-  // Bottom flex-grow slot: files OR git (D49). Both non-grow; render() sets the active one's flexGrow, the
-  // other collapses to height 0.
+  // Bottom flex-grow slot: files OR git (D49), whichever `bottomView` selects.
   const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE, true);
   const gitPanel = mkPanel("gitPanel", " git ", () => theme.GREEN, true);
-  // Only the ACTIVE bottom panel sits in the layout — a bordered box can't collapse to height 0 (the border
-  // has a min height), so we add/remove to truly hide the other rather than resize it. Starts on files.
-  for (const p of [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) box.add(p);
-  let bottomShown: "files" | "git" = "files";
-  const setBottom = (view: "files" | "git"): void => {
-    if (view === bottomShown) return;
-    box.remove(bottomShown === "files" ? "filesPanel" : "gitPanel");
-    box.add(view === "files" ? filesPanel : gitPanel);
-    bottomShown = view;
+  // A bordered box can't collapse to height 0 (the border has a min height), so "hide a panel" means drop it
+  // from the layout, not resize it. `byId` maps panelLayout()'s ids back to boxes; `syncPanels` reconciles
+  // the box's children to that ordered set — but only when the set changes (panelSig), since render() runs
+  // every keystroke. cwd + session are seeded so the box is never momentarily empty.
+  const byId: Record<string, BoxRenderable> = {
+    cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel, gitPanel,
   };
+  const TOP_PANELS = [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel];
+  box.add(cwdPanel);
+  box.add(sessionPanel);
+  let panelSig = "cwdPanel,sessionPanel";
+  const syncPanels = (ids: string[]): void => {
+    const sig = ids.join(",");
+    if (sig === panelSig) return;
+    panelSig = sig;
+    for (const c of [...box.getChildren()]) box.remove(c.id);
+    for (const id of ids) box.add(byId[id]!);
+  };
+  // Height of the panels above the bottom slot — only those actually in the layout (hidden ones are gone).
+  const topHeight = (): number => TOP_PANELS.reduce((h, p) => h + (box.getRenderable(p.id) ? p.height : 0), 0);
   const CWD_ROWS = 2; // path + branch
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
@@ -176,15 +202,12 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
         const icon = ls.state === "running" ? fg(theme.GREEN)("●") : ls.state === "spawning" ? fg(theme.YELLOW)("◌") : fg(theme.RED)("✗");
         tr.content = t`${icon} ${fg(theme.FG)(trunc(ls.id, W - 2))}`;
         tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
-        tr.height = 1;
       } else {
         tr.content = "";
         tr.height = 0;
       }
     }
-    lspPanel.height = Math.max(1, lspServers.length) + 2;
+    lspPanel.height = lspServers.length + 2;
 
     // tools panel: the main agent's tool calls this session + status (● running · ✓ ok · ✗ error).
     const toolWin = s.tools.slice(-TOOL_ROWS);
@@ -195,15 +218,12 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
         const icon = tc.status === "running" ? fg(theme.YELLOW)("●") : tc.status === "ok" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
         tr.content = t`${icon} ${fg(theme.FG)(trunc(tc.name, W - 2))}`;
         tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
-        tr.height = 1;
       } else {
         tr.content = "";
         tr.height = 0;
       }
     }
-    toolsPanel.height = Math.max(1, toolWin.length) + 2;
+    toolsPanel.height = toolWin.length + 2;
 
     // subagents panel: this session's `task` delegations + status (● running · ✓ done · ✗ failed).
     const subWin = s.subagents.slice(-SUB_ROWS);
@@ -214,36 +234,29 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
         const icon = sa.status === "running" ? fg(theme.YELLOW)("●") : sa.status === "done" ? fg(theme.GREEN)("✓") : fg(theme.RED)("✗");
         tr.content = t`${icon} ${fg(theme.MUTE)(trunc(sa.prompt, W - 2))}`;
         tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none)")}`;
-        tr.height = 1;
       } else {
         tr.content = "";
         tr.height = 0;
       }
     }
-    subagentsPanel.height = Math.max(1, subWin.length) + 2;
+    subagentsPanel.height = subWin.length + 2;
 
-    // bottom flex-grow slot (D49): files OR git — only the active panel is in the layout (Ctrl+G swaps it in).
-    setBottom(s.bottomView);
+    // Reconcile which panels are in the layout (the no-value ones drop out), then fill the bottom slot.
+    syncPanels(panelLayout(s));
     if (s.bottomView === "git") renderGit(s);
-    else renderFiles(s);
+    else if (s.files.length) renderFiles(s);
   }
 
   // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
   function renderFiles(s: SidebarState): void {
     const files = s.files;
-    const usedAbove = cwdPanel.height + sessionPanel.height + todosPanel.height + skillsPanel.height + lspPanel.height + toolsPanel.height + subagentsPanel.height + 2;
-    const cap = Math.max(1, Math.min(FILE_ROWS, s.termHeight - usedAbove));
+    const cap = Math.max(1, Math.min(FILE_ROWS, s.termHeight - (topHeight() + 2)));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
       if (i < Math.min(files.length, cap)) {
         const f = files[i]!;
         const name = trunc(relative(s.cwd, f) || f, W - 2);
         tr.content = s.sessionEdited.has(f) ? t`${fg(theme.YELLOW)("✎")} ${fg(theme.FG)(name)}` : t`${fg(theme.DIM)("·")} ${fg(theme.MUTE)(name)}`;
-        tr.height = 1;
-      } else if (i === 0) {
-        tr.content = t`${fg(theme.DIM)("(none yet)")}`;
         tr.height = 1;
       } else {
         tr.content = "";
@@ -264,8 +277,7 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       if (r.hash) rows.push(t`${fg(theme.MAGENTA)(r.rail)}${fg(theme.YELLOW)(r.hash)} ${fg(theme.FG)(trunc(r.subject, Math.max(4, W - r.rail.length - r.hash.length - 1)))}`);
       else rows.push(t`${fg(theme.MAGENTA)(r.rail.replace(/\s+$/, ""))}`); // connector line (rail only)
     }
-    const usedAbove = cwdPanel.height + sessionPanel.height + todosPanel.height + skillsPanel.height + lspPanel.height + toolsPanel.height + subagentsPanel.height + 2;
-    const cap = Math.max(1, Math.min(GIT_ROWS, s.termHeight - usedAbove));
+    const cap = Math.max(1, Math.min(GIT_ROWS, s.termHeight - (topHeight() + 2)));
     for (let i = 0; i < gitRows.length; i++) {
       const show = i < Math.min(rows.length, cap);
       gitRows[i]!.content = show ? rows[i]! : "";
@@ -279,7 +291,6 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       return box.width > 0;
     },
     render,
-    renderTodoSummary,
     setActivity(chunk: Content) {
       if (box.width > 0) sessionRows[5]!.content = chunk;
     },

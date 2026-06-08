@@ -37,13 +37,16 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   language servers + state `●`/`◌`/`✗`, from `Lsp.serverStatus()`), **tools** also shows the **post-edit
   hooks** (ruff/prettier/…) as they run, **skills** (the skills *loaded into context now* —
   always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
-  this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
-  session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and a bottom flex-grow slot that
+  this exchange + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
+  exchange's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and a bottom flex-grow slot that
   **`Ctrl+G` swaps between files ↔ git** ([D49](../DECISIONS.md)): **files** (touched files, most-recent
-  first; `✎` written, `·` read-only) or **git** (branch/status header + a `git log --graph` of how branches relate). All use the same
-  fixed-pool-of-rows pattern as the todo panel; each compact panel keeps a **`(none …)` placeholder** when
-  empty (so it never collapses to a thin border), and the files pool is height-capped (subtracting the other
-  panels) so it never overflows. **`Ctrl+B`** toggles the sidebar; it **auto-hides below 100 cols** (guarded
+  first; `✎` written, `·` read-only) or **git** (branch/status header + a `git log --graph` of how branches
+  relate). All use the same fixed-pool-of-rows pattern as the todo panel. **Panels with no value yet are
+  hidden** ([D50](../DECISIONS.md)): a bordered box can't collapse to height 0, so `panelLayout`/`syncPanels`
+  drop empty panels (todos/skills/lsp/tools/subagents, and files until a file is touched) **out of the layout**
+  rather than draw an empty box — and **tools/subagents are transient**: reset at the start of each exchange
+  and auto-hidden ~60 s after the turn, so they show *current* activity, not a session-long log. The files/git
+  pool is height-capped (subtracting the visible panels above) so it never overflows. **`Ctrl+B`** toggles the sidebar; it **auto-hides below 100 cols** (guarded
   `renderer.on("resize")`). `renderSidebar()` is a no-op while hidden, driven off `setStatus()` + the
   per-turn `langTouched`/`sessionEdited`/`toolCalls`/`subagents` state — no engine bookkeeping beyond the
   loop's tool hooks. Resets with the session (`/drop`, `/resume`).

@@ -259,8 +259,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   };
   const setTodos = (todos: Todo[]): void => {
     currentTodos = todos;
-    renderTodoPanel(); // the full panel (respects todoVisible)
-    sidebar.renderTodoSummary(todos); // just the 1-line sidebar summary — no full rebuild on a todo write
+    renderTodoPanel(); // the full overlay panel (respects todoVisible)
+    renderSidebar(); // membership-aware: shows/hides the sidebar todos panel + refreshes its 1-line summary
   };
   const toggleTodos = (): void => {
     todoVisible = !todoVisible;
@@ -271,8 +271,17 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // session state and gathers it into a SidebarState per render; Ctrl+B toggles, narrow terminals auto-hide.
   let sidebarOn = true;
   const sessionEdited = new Set<string>(); // files written/edited this session → ✎ in the files panel
-  const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // task runs this session
-  const toolCalls: { id: string; name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this session
+  // Tools + subagents are TRANSIENT, not a session-long log: reset at the start of each exchange (a new turn
+  // replaces the last turn's activity) and auto-hidden a while after the turn ends (`transientTimer`), so the
+  // panels show "what's happening now", not an ever-growing list. Empty → the panel drops out of the sidebar.
+  const subagents: { id: string; prompt: string; status: "running" | "done" | "failed" }[] = []; // `task` runs this exchange
+  const toolCalls: { id: string; name: string; status: "running" | "ok" | "err" }[] = []; // main-agent tool calls this exchange
+  let transientTimer: ReturnType<typeof setTimeout> | null = null;
+  const TRANSIENT_MS = 60_000; // how long tools/subagents linger after a turn before they auto-hide
+  const clearTransient = (): void => {
+    if (transientTimer) clearTimeout(transientTimer);
+    transientTimer = null;
+  };
   // The animated working indicator (spinner + label), shared by the session panel + status bar. A *moving*
   // spinner is the point: it proves the agent is alive (a frozen one means it stalled), the label flips to
   // red "stopping…" the instant ESC registers, and the whole indicator disappears when the turn ends — so
@@ -864,6 +873,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // Send a prompt to the agent: echo a transcript line, persist the (possibly longer) model text, run a turn.
   async function sendPrompt(modelText: string, echo: () => Content): Promise<void> {
     if (busy) return;
+    // New exchange → drop the previous turn's transient tools/subagents (they show "now", not a session log).
+    clearTransient();
+    toolCalls.length = 0;
+    subagents.length = 0;
     busy = true;
     setStatus();
     if (lines.length > 1) {
@@ -884,6 +897,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     setStatus();
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
     void refreshGit(); // D49: reflect any commit/branch/file changes the turn made
+    // Let this turn's tools/subagents linger a moment, then auto-hide them (transient, not a forever log).
+    clearTransient();
+    transientTimer = setTimeout(() => {
+      toolCalls.length = 0;
+      subagents.length = 0;
+      renderSidebar();
+    }, TRANSIENT_MS);
     input.focus();
   }
 
@@ -1120,6 +1140,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     shuttingDown = true;
     turnAbort?.abort();
     if (activityTimer) clearInterval(activityTimer); // stop the working-indicator animation
+    clearTransient(); // cancel the pending tools/subagents auto-hide (no render after destroy)
     themeMonitor?.kill(); // stop following the system theme (D30)
     await session.close();
     await opts.lsp?.stop();

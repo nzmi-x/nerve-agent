@@ -1227,6 +1227,30 @@ interaction is typecheck- + load-verified (no TTY in CI). Manual at `docs/manual
 
 ---
 
+## D50 — Sidebar: hide no-value panels, and make tools/subagents transient
+**Decision.** The sidebar (D29) stops showing empty/stale panels:
+1. **Hide a panel until it has a value.** `todos`, `skills`, `lsp`, `tools`, `subagents`, and the bottom
+   `files` panel drop **out of the layout** when empty — no more `(none yet)` placeholders. cwd + session are
+   always on; the **git** view stays when explicitly toggled (Ctrl+G) even if empty. A bordered box can't
+   collapse to height 0 (the border has a min height), so "hide" means **remove from the layout**: a pure,
+   exported `panelLayout(state)` returns the ordered visible panel ids, and `syncPanels` reconciles the box's
+   children to it — guarded by a signature so it only rebuilds when the *set* changes, not every keystroke.
+2. **Tools/subagents are transient, not a session log.** They **reset at the start of each exchange** (a new
+   turn replaces the last turn's activity) and **auto-hide ~60 s after a turn ends** (`transientTimer`), so the
+   panels answer "what's happening now", not "everything this session". Combined with (1), they vanish when
+   empty.
+**Why.** The user found the sidebar cluttered: panels with nothing in them still drew a box, and tools/subagents
+accumulated **forever**. They asked to "not show panels that don't have a value yet" and to show tools/subagents
+"for a duration of time or until another tool replaces them" — both mechanisms are implemented (per-exchange
+reset = replacement; the timer = duration).
+**Rejected.** Collapsing a bordered panel to height 0 (impossible — min border height; the D49 files↔git bug);
+a session-long tool log (the complaint); a placeholder row for empty panels (defeats the point).
+**Phase.** Built. `panelLayout` + `syncPanels`/`topHeight` in `src/tui/sidebar.ts`; `transientTimer` +
+per-exchange reset in `app.ts` `sendPrompt`. Tests: `tests/sidebar.test.ts` (the visibility policy). Timer +
+render are load-verified (no TTY in CI).
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while
