@@ -368,8 +368,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // --- transcript -----------------------------------------------------------
   // Every line keeps what it needs to re-render itself, so a live theme change (D30) recolors in place with
   // **zero loss**: `text` lines rebuild from their `make` thunk (it re-reads the palette); `plain` lines —
-  // incl. the streaming reasoning line, which accumulates via `.content +=` — just recolor `fg`; `md` blocks
-  // swap `syntaxStyle` + re-set content. Everything added to the transcript goes through these helpers.
+  // incl. the streaming reasoning line — just recolor `fg`; `md` blocks swap `syntaxStyle` + re-set content.
+  // (A TextRenderable's `content` getter returns a StyledText, so a growing `plain` line re-SETs its full
+  // string each delta — never `content += d`, which would stringify to "[object Object]".) Everything added
+  // to the transcript goes through these helpers.
   type Line =
     | { kind: "text"; el: TextRenderable; make: () => Content }
     | { kind: "plain"; el: TextRenderable; role: () => string }
@@ -382,7 +384,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     lines.push({ kind: "text", el, make });
     return el;
   };
-  // Plain-text line tinted by one role colour (recoloured via `fg`); supports `.content +=` growth.
+  // Plain-text line tinted by one role colour (recoloured via `fg`). To GROW it, re-set `.content` with the
+  // full string (a TextRenderable's content getter is a StyledText — `content += d` would clobber it).
   const addPlain = (text: string, role: () => string = () => theme.FG, attributes = 0): TextRenderable => {
     const el = new TextRenderable(renderer, { id: `ln-${lineId++}`, content: text, fg: role(), attributes });
     transcript.add(el);
@@ -1057,6 +1060,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // agent's stuck, so we stop (no hardcoded retry cap; the agent's choice to stop editing ends it).
   async function runAgentTurn(prevIssues?: string, images?: ImageInput[]): Promise<void> {
     let reasoningLine: TextRenderable | null = null;
+    let reasoningText = ""; // the reasoning accumulated as a STRING (see the reasoningRouter note — `.content +=` clobbers)
     // The assistant's prose is rendered lazily (created on the first text delta) and **sealed when a tool
     // call starts**, so the next step's prose opens a FRESH block *below* the tool-result lines — the
     // transcript interleaves prose → tools → prose → tools chronologically, instead of pooling all prose
@@ -1122,9 +1126,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           ic.reasoningRouter((d) => {
             if (!reasoningLine) {
               gapIfNeeded();
+              reasoningText = "";
               reasoningLine = addPlain("✻ ", () => theme.DIM, TextAttributes.ITALIC);
             }
-            reasoningLine.content += d;
+            // NB: a TextRenderable's `content` GETTER returns a StyledText, so `content += d` would stringify
+            // it to "[object Object]" and clobber the line. Accumulate a real string and re-set the whole line.
+            reasoningText += d;
+            reasoningLine.content = `✻ ${reasoningText}`;
           }),
           ic.tokenTap(session),
         ],
