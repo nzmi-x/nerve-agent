@@ -39,6 +39,12 @@ export function commandRoots(cwd: string = process.cwd()): string[] {
   ];
 }
 
+/** Absolute root of nerve's OWN source tree (the repo it runs from). The agent self-hacks here via the
+ *  `self:` tool-path prefix regardless of cwd (D36). paths.ts lives in `src/`, so the root is one up. */
+export function nerveSourceRoot(): string {
+  return resolve(import.meta.dir, "..");
+}
+
 /** Optional global model catalog; overrides the bundled `config/models.json` when present. */
 export function globalModelsPath(): string {
   return join(nerveHome(), "models.json");

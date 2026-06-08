@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolvePath } from "./resolve.ts";
 import type { Tool } from "./types.ts";
 
 const IGNORE = /(^|\/)(node_modules|\.git|references|\.nerve|dist|out)\//;
@@ -18,7 +18,7 @@ export const glob: Tool = {
   readonly: true,
   async run(args, ctx) {
     if (typeof args.pattern !== "string") return "Error: 'pattern' must be a string";
-    const cwd = resolve(ctx.cwd, typeof args.path === "string" ? args.path : ".");
+    const cwd = resolvePath(ctx.cwd, typeof args.path === "string" ? args.path : ".");
     const out: string[] = [];
     try {
       for await (const p of new Bun.Glob(args.pattern).scan({ cwd, onlyFiles: true, dot: false })) {

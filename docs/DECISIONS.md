@@ -858,6 +858,37 @@ if you move it.
 
 ---
 
+## D36 — Self-modification from any project: the `self:` tool-path prefix
+**Decision.** The file tools (`read`/`edit`/`write`/`ls`/`grep`/`glob`) resolve paths through
+`resolvePath` (`src/tools/resolve.ts`): a path prefixed `self:` targets nerve's **own source tree**
+(`nerveSourceRoot()` — the repo it runs from) regardless of cwd, the remainder treated as repo-relative;
+every other path stays working-dir-relative as before. So the agent can adapt its own tools/prompts/docs
+while launched in **any** project, then apply the change via `/reload` (tools + interceptors,
+cwd-independent) or a restart (engine — no rebuild, [D35](#d35--distribution-a-launcher-on-path-never-a-compiled-binary)).
+Surfaced in [`prompts/system.md`](../prompts/system.md) and a `manual("self")` page.
+**Why.** Self-hackability ([D7](#d7--self-hacking-runtime-hot-swap-of-seams)) only paid off when nerve was
+launched *inside* its own repo, because the file tools were cwd-scoped — tuning nerve to a workflow meant
+`cd`-ing into the repo first. The plumbing was already half-there (absolute paths were never jailed;
+`/reload` and `manual` resolve relative to the install, not cwd); the gap was the agent **knowing** where
+its source lives and a **stable, legible** way to address it. `self:` makes a self-edit a first-class,
+visible operation without a per-install absolute path.
+**Safety.** A self-edit is a write → **EDIT-mode only** (PLAN can read its own source + docs and *plan* a
+change, not apply it, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch)); the
+destructive-bash floor ([D18](#d18--destructive-command-guard-a-safety-floor-under-both-modes)) and the
+reload rollback ([D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts))
+are untouched. The model still **cannot** author its own guardrails or change its mode — `self:` is a path
+prefix, not a permission. Cost accepted: a self-edit has **global blast radius** (changes nerve for every
+project); `/reload` rolls back a tool that fails to *import*, but not a logic bug, and engine edits need a
+restart with no rollback.
+**Rejected.** Absolute-paths-only (works today but no stable addressing and no visual distinction for these
+higher-stakes edits); a dedicated `self` tool/mode (duplicates `read`/`edit`, fails the
+[D2](#d2--tools-earn-their-place-by-a-rent-heuristic-not-a-fixed-count) rent test — `self:` is ~15 lines
+reusing the existing tools).
+**Phase.** Built (Phase 1.5). Resolver in `src/tools/resolve.ts` (`tests/resolve.test.ts`); manual page at
+`docs/manual/self.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while

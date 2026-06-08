@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { applyEdits, encode, type HashEdit } from "../hashline.ts";
+import { resolvePath } from "./resolve.ts";
 import type { Tool } from "./types.ts";
 
 // Above this many lines, skip echoing fresh anchors on success (re-read a region instead).
@@ -13,7 +13,7 @@ export const edit: Tool = {
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path, absolute or relative to the working dir." },
+      path: { type: "string", description: "File path, absolute or relative to the working dir. Prefix `self:` to edit nerve's own source." },
       edits: {
         type: "array",
         description: "Edits against the file as last read; line numbers refer to that original.",
@@ -37,14 +37,14 @@ export const edit: Tool = {
     if (!Array.isArray(args.edits) || args.edits.length === 0)
       return "Error: 'edits' must be a non-empty array";
 
-    const file = Bun.file(resolve(ctx.cwd, args.path));
+    const abs = resolvePath(ctx.cwd, args.path);
+    const file = Bun.file(abs);
     if (!(await file.exists())) return `Error: no such file: ${args.path}`;
     const content = (await file.text()).replaceAll("\r\n", "\n");
 
     const result = applyEdits(content, args.edits as HashEdit[]);
     if (!result.ok) return `Edit rejected — ${result.error}\nFresh anchors:\n${result.anchors}`;
 
-    const abs = resolve(ctx.cwd, args.path);
     await Bun.write(abs, result.content);
     ctx.touched?.add(abs);
     ctx.edited?.add(abs); // post-edit hooks run on this at turn end (D24)

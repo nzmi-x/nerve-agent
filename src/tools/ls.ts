@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { readdir } from "node:fs/promises";
+import { resolvePath } from "./resolve.ts";
 import type { Tool } from "./types.ts";
 
 export const ls: Tool = {
@@ -11,7 +11,7 @@ export const ls: Tool = {
   },
   readonly: true,
   async run(args, ctx) {
-    const dir = resolve(ctx.cwd, typeof args.path === "string" ? args.path : ".");
+    const dir = resolvePath(ctx.cwd, typeof args.path === "string" ? args.path : ".");
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });

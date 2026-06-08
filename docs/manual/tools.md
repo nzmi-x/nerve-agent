@@ -63,7 +63,9 @@ set, so the swap needs no engine change. Keep tool files re-import-safe (no top-
   `TOOL_MODULES` in `registry.ts` (the latter so it hot-reloads). Set `readonly` honestly. A tool must
   earn its rent ([D2](../DECISIONS.md)): high frequency × reuse × token-savings vs. an ad-hoc bash call.
 - Keep `run` thin and side-effect-honest (`Bun.file`/`Bun.write`/`Bun.$`/`fetch`). Resolve paths
-  against `ctx.cwd`.
+  via `resolvePath(ctx.cwd, p)` (`src/tools/resolve.ts`), **not** raw `resolve(ctx.cwd, p)` — that's
+  what honors the `self:` prefix (target nerve's own source from any cwd, [D36](../DECISIONS.md), see
+  [self](self.md)). `read`/`edit`/`write`/`ls`/`grep`/`glob` already do.
 
 **Gotchas:**
 - Tools don't know which model called them — provider tool-call shapes are normalized to

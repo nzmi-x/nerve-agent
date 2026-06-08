@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { encode } from "../hashline.ts";
+import { resolvePath } from "./resolve.ts";
 import type { Tool } from "./types.ts";
 
 export const read: Tool = {
@@ -9,14 +9,14 @@ export const read: Tool = {
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path, absolute or relative to the working dir." },
+      path: { type: "string", description: "File path, absolute or relative to the working dir. Prefix `self:` to target nerve's own source." },
     },
     required: ["path"],
   },
   readonly: true,
   async run(args, ctx) {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
-    const abs = resolve(ctx.cwd, args.path);
+    const abs = resolvePath(ctx.cwd, args.path);
     ctx.touched?.add(abs); // language-pack trigger (D24)
     const file = Bun.file(abs);
     if (!(await file.exists())) return `Error: no such file: ${args.path}`;

@@ -58,6 +58,11 @@ just drops a launcher that runs the repo's `index.ts`, so hot-reload + prompt ho
   model-writable flag). PLAN allows read tools + obviously-safe single-program bash only.
 - **`edit` is hashline-only.** `read` emits `LINE#HASH:content`; edits anchor at hashes; a stale
   anchor hard-rejects with fresh anchors. Don't add a second edit tool or silent relocation.
+- **`self:` path prefix = self-hack from any cwd (D36).** File tools resolve via `resolvePath`
+  (`src/tools/resolve.ts`): `self:x` → repo-relative (nerve's own source), any other path → cwd. So nerve
+  adapts itself while launched in another project. New file tools MUST use `resolvePath`, not raw
+  `resolve(ctx.cwd, …)`. `self:` is a path prefix, not a permission — self-edits are still EDIT-only and
+  the mode/guardrails are untouched. See `manual("self")`.
 - **Hot-swap seams:** `/reload` (and `Ctrl+R`) re-imports `src/tools/` + `src/interceptors.ts` via
   Bun cache-busted dynamic import, conversation preserved. Keep those modules re-import-safe (no
   top-level side effects that can't run twice). The engine (loop/providers/session) never swaps.

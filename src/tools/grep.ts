@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { resolvePath } from "./resolve.ts";
 import type { Tool } from "./types.ts";
 
 const IGNORE = /(^|\/)(node_modules|\.git|references|\.nerve|dist|out)\//;
@@ -27,7 +28,7 @@ export const grep: Tool = {
     } catch (e) {
       return `Error: invalid regex: ${(e as Error).message}`;
     }
-    const base = resolve(ctx.cwd, typeof args.path === "string" ? args.path : ".");
+    const base = resolvePath(ctx.cwd, typeof args.path === "string" ? args.path : ".");
     const pattern = typeof args.glob === "string" ? args.glob : "**/*";
     const matches: string[] = [];
     try {
