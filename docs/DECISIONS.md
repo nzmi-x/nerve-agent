@@ -1214,6 +1214,11 @@ should see).
 Both the files panel and the edit-diff header render paths via **`displayPath`** (`src/tui/format.ts`) — the
 shortest of the file's cwd-relative, `~`-relative, and absolute forms — so an out-of-workspace file like
 `/tmp/test.txt` shows as `/tmp/test.txt`, not `../../../../tmp/test.txt`, and a home file as `~/Pictures/x`.
+
+*Later refinements (tasks 2–3):* the standalone **location panel was merged into the `session` panel** (its
+cwd + branch are now that panel's top rows), and the **status bar mirrors cwd + branch** so they survive when
+the sidebar is hidden (the bar sits under the input box). The animated working spinner became a **static `●`
+bullet** — its ~90ms repaint lagged with the sidebar hidden.
 **Why.** nerve surfaced *where you are*, the project's *git state*, and *what the agent changed* nowhere — the
 last especially (only a text "Applied N edits"). The user wanted a starship-like dir+branch, a glanceable git
 view (their idea: reuse the files slot), and to *see* the agent's edits. `git diff` is the wrong tool for the
@@ -1257,9 +1262,10 @@ render are load-verified (no TTY in CI).
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
-  `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while
-  a turn runs; `ESC` flips it to red `stopping…` immediately and it vanishes when the turn ends, so the
-  user can tell working vs. interrupting vs. stopped (a static indicator couldn't show liveness).
+  `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a
+  turn runs; `ESC` flips it to red `stopping…` immediately and it vanishes when the turn ends, so the user
+  can tell working vs. interrupting vs. stopped. *(Was an animated braille spinner; its ~90ms repaint lagged
+  when the sidebar was hidden, so it's a static bullet now — task 2.)*
 - **Mode switch:** `Shift+Tab` cycles PLAN ↔ EDIT (human-only, [D4](#d4--permissions-two-human-switched-modes-enforced-at-dispatch));
   plain `Tab` also toggles it **when no autosuggest popup is open** (popup-`Tab` accepts the suggestion).
   **Startup default is PLAN** (read-only — safer first contact); `--mode edit` opts into EDIT from launch.

@@ -12,9 +12,9 @@ const empty = {
   bottomView: "files" as const,
 };
 
-test("panelLayout: a fresh session shows only the always-on panels", () => {
-  // No todos/skills/lsp/tools/subagents/files yet → nothing but cwd + session (no '(none yet)' placeholders).
-  expect(panelLayout(empty)).toEqual(["cwdPanel", "sessionPanel"]);
+test("panelLayout: a fresh session shows only the always-on panel", () => {
+  // No todos/skills/lsp/tools/subagents/files yet → just the session panel (which now carries cwd + branch).
+  expect(panelLayout(empty)).toEqual(["sessionPanel"]);
 });
 
 test("panelLayout: each panel appears only once it has a value", () => {
@@ -37,7 +37,6 @@ test("panelLayout: panels keep their canonical top-to-bottom order", () => {
     bottomView: "files",
   } as any);
   expect(all).toEqual([
-    "cwdPanel",
     "sessionPanel",
     "todosPanel",
     "skillsPanel",

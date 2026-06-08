@@ -34,7 +34,7 @@ import { diffRows, diffStat } from "../diff.ts";
 import { gitBranch, gitStatus, gitGraph, type GitStatus, type GraphRow } from "../git.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
-import { firstLine, trunc, rel, displayPath } from "./format.ts";
+import { firstLine, trunc, rel, displayPath, shortenPath } from "./format.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
 import type { Message, Provider } from "../providers/types.ts";
@@ -106,7 +106,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let busy = false;
   let aborting = false; // ESC pressed during a turn — show "stopping…" until the turn actually ends
   const steerQueue: string[] = []; // D46: messages typed mid-turn — injected as user turns between turns (steering)
-  let spin = 0; // activity-spinner frame (animated while busy, so the user can see the agent is alive)
   let turnAbort: AbortController | null = null;
   let lineId = 0;
   let echoGuard: string | null = null;
@@ -121,7 +120,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let pasteSeq = 0;
   let pendingRetheme = false; // a system light/dark change arrived mid-turn — apply it once idle (D30)
   let themeMonitor: ReturnType<typeof Bun.spawn> | null = null;
-  let activityTimer: ReturnType<typeof setInterval> | null = null;
 
   let suggest: { kind: "at" | "slash" | "none"; items: Suggestion[]; sel: number } = { kind: "none", items: [], sel: 0 };
   let asking: { req: AskRequest; sel: number; resolve: (answer: string) => void } | null = null;
@@ -282,13 +280,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (transientTimer) clearTimeout(transientTimer);
     transientTimer = null;
   };
-  // The animated working indicator (spinner + label), shared by the session panel + status bar. A *moving*
-  // spinner is the point: it proves the agent is alive (a frozen one means it stalled), the label flips to
-  // red "stopping…" the instant ESC registers, and the whole indicator disappears when the turn ends — so
-  // the user always knows working vs. interrupting vs. stopped. Advanced by `activityTimer`.
-  const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  // The working indicator: a static `●` bullet + label, shown in the session panel + status bar while busy
+  // (task 2). It used to be an animated braille spinner re-rendered every ~90ms, but that repaint *lagged*
+  // visibly when the sidebar was hidden (the wider status bar repaints). The label still flips to red
+  // "stopping…" the instant ESC registers, and the indicator vanishes when the turn ends.
   const activityChunk = (pad = false) =>
-    fg(aborting ? theme.RED : theme.YELLOW)(`${pad ? "   " : ""}${SPINNER[spin % SPINNER.length]} ${aborting ? "stopping…" : "working"}`);
+    fg(aborting ? theme.RED : theme.YELLOW)(`${pad ? "   " : ""}● ${aborting ? "stopping…" : "working"}`);
   // Gather app.ts's live state into a snapshot and hand it to the sidebar module (./sidebar.ts) to paint.
   function renderSidebar(): void {
     const s = meter.snapshot();
@@ -408,7 +405,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     renderer.setBackgroundColor(theme.DARKFG);
     transcriptBox.borderColor = theme.ACCENT; // titled panels keep their accent border (the title rides on it)
     inputBox.borderColor = theme.BORDER;
-    sidebar.retheme(); // recolor the sidebar's 7 panel borders
+    sidebar.retheme(); // recolor the sidebar's panel borders
     status.bg = theme.PANEL;
     prompt.fg = theme.ACCENT;
     input.textColor = theme.FG;
@@ -581,7 +578,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   const setStatus = (): void => {
     const s = meter.snapshot();
     const badge = mode === "edit" ? bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT ")) : bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "));
-    status.content = t` ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
+    // cwd + git branch live in the sidebar's session panel; the status bar (under the input box) is the only
+    // place they'd show when the sidebar is hidden, so mirror them here (task 3). Flat chunks only — a nested
+    // `t` renders as "[object Object]" — so each branch piece is its own conditional interpolation.
+    const arrow = gitData.branch ? fg(theme.MAGENTA)("⎇") : "";
+    const branch = gitData.branch ? fg(theme.FG)(` ${gitData.branch}`) : "";
+    const dirty = gitData.branch ? (gitData.status?.dirty ? fg(theme.YELLOW)(` ●${gitData.status.dirty}`) : fg(theme.GREEN)(" ✓")) : "";
+    status.content = t` ${fg(theme.MUTE)(shortenPath(cwd))} ${arrow}${branch}${dirty}  ${fg(theme.DIM)("│")}  ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
@@ -621,6 +624,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       sysInfo("nothing old enough to compact yet");
       return;
     }
+    aborting = false;
     busy = true;
     setStatus();
     const note = addText(() => t`${fg(theme.MAGENTA)("✦")} ${fg(theme.MUTE)("compacting…")}`);
@@ -877,6 +881,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     clearTransient();
     toolCalls.length = 0;
     subagents.length = 0;
+    aborting = false; // fresh turn → the indicator reads "working", never a stale "stopping…" (the timer used to reset this)
     busy = true;
     setStatus();
     if (lines.length > 1) {
@@ -1139,7 +1144,6 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     turnAbort?.abort();
-    if (activityTimer) clearInterval(activityTimer); // stop the working-indicator animation
     clearTransient(); // cancel the pending tools/subagents auto-hide (no render after destroy)
     themeMonitor?.kill(); // stop following the system theme (D30)
     await session.close();
@@ -1298,18 +1302,5 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
-  void refreshGit(); // D49: populate the cwd panel's branch + status on launch
-
-  // Animate the working indicator (~11 fps) so the user can always see the agent is alive. Cheap: while
-  // busy it advances the spinner on just the visible surface (session panel if the sidebar's up, else the
-  // status bar); while idle it clears the "stopping…" latch and does nothing else.
-  activityTimer = setInterval(() => {
-    if (!busy) {
-      aborting = false;
-      return;
-    }
-    spin = (spin + 1) % SPINNER.length;
-    if (sidebar.visible) sidebar.setActivity(t`${activityChunk()}`);
-    else setStatus();
-  }, 90);
+  void refreshGit(); // D49: populate the session panel's branch + status on launch
 }

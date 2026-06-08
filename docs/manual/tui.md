@@ -27,10 +27,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**
-  (the title rides on the border colour — cwd=cyan, session=cyan, todos=accent, skills=magenta, lsp=accent,
-  tools=green, subagents=yellow, files=orange, git=green; the transcript box is accent-blue). A **cwd** panel
-  ([D49](../DECISIONS.md)) tops the stack — the working dir (starship-style `shortenPath`) + `⎇ branch · ● dirty · ↑↓`.
-  **session** (model ·
+  (the title rides on the border colour — session=cyan, todos=accent, skills=magenta, lsp=accent,
+  tools=green, subagents=yellow, files=orange, git=green; the transcript box is accent-blue).
+  **session** tops the stack and now **carries the cwd + git branch** (task 3 — the old standalone cwd panel
+  was merged in): working dir (starship-style `shortenPath`) · `⎇ branch · ● dirty · ↑↓` · model ·
   mode badge · cost · ctx · balance — the *session title* lives in the transcript box header, not here),
   **todos** (a **1-line summary** of the task list — `▸ done/total <current focus>`, the always-visible
   counterpart to the Ctrl+T full panel), **lsp** (spawned
@@ -67,18 +67,20 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   prose → tools → prose → tools in order, instead of pooling all prose at the top and all tool lines at
   the bottom. (`sealBlock` closes the final block in the `finally`; a free helper because TS can't narrow
   the closure-mutated `answer`.)
-- **Status bar:** `model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a `bg` mode badge,
-  fed by `UsageMeter` (on `usage` events) + `fetchBalance` (startup / `/model` / `/balance`). **Shown only
-  when the sidebar is hidden** (the session panel carries the same fields, D29) — when the sidebar is up the
-  bar collapses (`height 0`) and the working indicator shows in the session panel instead.
-  See [usage](usage.md), [balance](balance.md).
-- **Working indicator (is it alive?):** while a turn runs, an **animated braille spinner** + `working`
-  shows on whichever surface is visible (session panel with the sidebar up, status bar otherwise),
-  advanced by a ~11 fps `activityTimer` (`spin`/`activityChunk`). The *motion* is the signal — a frozen
-  spinner means a stall. On **ESC** the label flips to a red **`stopping…`** immediately (`aborting`
-  latch) so the keypress visibly registers even before the in-flight stream/tool unwinds; when the turn
-  actually ends the indicator **disappears** (`busy=false`) — so the user always distinguishes working vs.
-  interrupting vs. stopped. The timer is cleared on `shutdown`.
+- **Status bar:** `cwd · ⎇ branch · model · [MODE badge] · cost · ctx · bal` via `t` styled segments + a
+  `bg` mode badge, fed by `UsageMeter` (on `usage` events) + `fetchBalance` (startup / `/model` / `/balance`).
+  **Shown only when the sidebar is hidden** (the session panel carries the same fields, D29) — when the
+  sidebar is up the bar collapses (`height 0`) and the indicator shows in the session panel instead. The
+  **cwd + branch are mirrored here** (task 3) because the sidebar is otherwise their only home; the `t`
+  template stays **flat** (a nested `t` renders as `[object Object]`), so each branch piece is its own
+  conditional chunk. See [usage](usage.md), [balance](balance.md).
+- **Working indicator (is it alive?):** while a turn runs, a **static `●` bullet** + `working` shows on
+  whichever surface is visible (session panel with the sidebar up, status bar otherwise). It used to be an
+  animated braille spinner re-rendered every ~90ms, but that repaint **lagged** when the sidebar was hidden
+  (the wider status bar repaints), so it's now a static bullet (task 2 — no `activityTimer`). On **ESC** the
+  label flips to a red **`stopping…`** immediately (`aborting` latch, re-rendered right there) so the keypress
+  visibly registers before the in-flight stream/tool unwinds; when the turn ends the indicator **disappears**
+  (`busy=false`). `aborting` resets at the start of the next turn.
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).

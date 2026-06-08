@@ -1,6 +1,6 @@
-// The right-hand dashboard (D29): bordered panels — cwd · session · todos · skills · lsp · tools ·
-// subagents · (files | git) — mirroring live session state. app.ts owns the state and gathers it into a
-// `SidebarState` per render; this module owns the panels, the row pools, and the fill/height logic.
+// The right-hand dashboard (D29): bordered panels — session (incl. cwd + git branch) · todos · skills ·
+// lsp · tools · subagents · (files | git) — mirroring live session state. app.ts owns the state and gathers
+// it into a `SidebarState` per render; this module owns the panels, the row pools, and the fill/height logic.
 // Each panel's title takes its border colour (OpenTUI has no separate title colour), so they get distinct
 // accents. The bottom flex-grow slot holds EITHER files or git (D49) — `bottomView` toggles it (Ctrl+G).
 // Hidden (width 0) below SIDEBAR_MIN cols or when toggled off — methods no-op then.
@@ -52,7 +52,7 @@ export interface SidebarState {
 export function panelLayout(
   s: Pick<SidebarState, "todos" | "skills" | "lspServers" | "tools" | "subagents" | "files" | "bottomView">,
 ): string[] {
-  const ids = ["cwdPanel", "sessionPanel"];
+  const ids = ["sessionPanel"]; // always on — it carries cwd + git branch + the session stats (task 3)
   if (s.todos.length) ids.push("todosPanel");
   if (s.skills.length) ids.push("skillsPanel");
   if (s.lspServers.length) ids.push("lspPanel");
@@ -86,8 +86,7 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
     return rows;
   };
-  const cwdPanel = mkPanel("cwdPanel", " cwd ", () => theme.CYAN);
-  const sessionPanel = mkPanel("sessionPanel", " session ", () => theme.CYAN);
+  const sessionPanel = mkPanel("sessionPanel", " session ", () => theme.CYAN); // cwd + git branch merged in (task 3)
   const todosPanel = mkPanel("todosPanel", " todos ", () => theme.ACCENT); // 1-line summary (full list is Ctrl+T)
   const skillsPanel = mkPanel("skillsPanel", " skills ", () => theme.MAGENTA);
   const lspPanel = mkPanel("lspPanel", " lsp ", () => theme.ACCENT);
@@ -101,12 +100,11 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
   // the box's children to that ordered set — but only when the set changes (panelSig), since render() runs
   // every keystroke. cwd + session are seeded so the box is never momentarily empty.
   const byId: Record<string, BoxRenderable> = {
-    cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel, gitPanel,
+    sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel, gitPanel,
   };
-  const TOP_PANELS = [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel];
-  box.add(cwdPanel);
+  const TOP_PANELS = [sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel];
   box.add(sessionPanel);
-  let panelSig = "cwdPanel,sessionPanel";
+  let panelSig = "sessionPanel";
   const syncPanels = (ids: string[]): void => {
     const sig = ids.join(",");
     if (sig === panelSig) return;
@@ -116,15 +114,13 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
   };
   // Height of the panels above the bottom slot — only those actually in the layout (hidden ones are gone).
   const topHeight = (): number => TOP_PANELS.reduce((h, p) => h + (box.getRenderable(p.id) ? p.height : 0), 0);
-  const CWD_ROWS = 2; // path + branch
-  const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
+  const SESSION_ROWS = 8; // cwd, branch, model, mode, cost, ctx, bal, indicator (cwd merged in, task 3)
   const SKILL_ROWS = 6;
   const LSP_ROWS = 5;
   const TOOL_ROWS = 6;
   const SUB_ROWS = 6;
   const FILE_ROWS = 40;
   const GIT_ROWS = 40;
-  const cwdRows = mkRows(cwdPanel, CWD_ROWS, "cwd", 1);
   const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
   const todoSumRows = mkRows(todosPanel, 1, "todosum", 1); // single summary row
   const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
@@ -155,27 +151,25 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
 
   function render(s: SidebarState): void {
     if (box.width === 0) return; // hidden — skip the work
-    // cwd panel (D49): working dir (starship-style) + git branch / dirty / ahead-behind, always on top.
-    cwdRows[0]!.content = t`${fg(theme.FG)(trunc(shortenPath(s.cwd), W))}`;
+    // session panel (task 3): cwd + git branch (merged from the old cwd panel) above model · mode · cost ·
+    // ctx · bal · indicator. The session *title* lives in the transcript box border, not here.
+    sessionRows[0]!.content = t`${fg(theme.FG)(trunc(shortenPath(s.cwd), W))}`;
     if (s.branch) {
       const dirty = s.gitDirty ? fg(theme.YELLOW)(`●${s.gitDirty}`) : fg(theme.GREEN)("✓");
-      cwdRows[1]!.content = t`${fg(theme.MAGENTA)("⎇")} ${fg(theme.FG)(trunc(s.branch, W - 10))} ${dirty}${aheadBehind(s.ahead, s.behind)}`;
-      cwdRows[1]!.height = 1;
+      sessionRows[1]!.content = t`${fg(theme.MAGENTA)("⎇")} ${fg(theme.FG)(trunc(s.branch, W - 10))} ${dirty}${aheadBehind(s.ahead, s.behind)}`;
+      sessionRows[1]!.height = 1;
     } else {
-      cwdRows[1]!.content = "";
-      cwdRows[1]!.height = 0;
+      sessionRows[1]!.content = "";
+      sessionRows[1]!.height = 0;
     }
-    cwdPanel.height = (s.branch ? 2 : 1) + 2;
-
-    // session panel: model · mode · cost · ctx · bal (the title now lives in the transcript box border).
-    sessionRows[0]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(s.model, W - 6))}`;
-    sessionRows[1]!.content = s.mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
-    sessionRows[2]!.content = t`${fg(theme.MUTE)("cost  ")}${fg(theme.FG)(formatCost(s.usage.costUsd))}`;
-    sessionRows[3]!.content = t`${fg(theme.MUTE)("ctx   ")}${fg(theme.FG)(formatContext(s.usage.contextTokens, s.contextWindow))}`;
-    sessionRows[4]!.content = t`${fg(theme.MUTE)("bal   ")}${fg(theme.GREEN)(formatBalance(s.balance))}`;
-    sessionRows[5]!.content = s.busy ? s.activity : ""; // animated working/stopping indicator
-    sessionRows[5]!.height = s.busy ? 1 : 0;
-    sessionPanel.height = (s.busy ? 6 : 5) + 2; // grows by the streaming row + border
+    sessionRows[2]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(s.model, W - 6))}`;
+    sessionRows[3]!.content = s.mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
+    sessionRows[4]!.content = t`${fg(theme.MUTE)("cost  ")}${fg(theme.FG)(formatCost(s.usage.costUsd))}`;
+    sessionRows[5]!.content = t`${fg(theme.MUTE)("ctx   ")}${fg(theme.FG)(formatContext(s.usage.contextTokens, s.contextWindow))}`;
+    sessionRows[6]!.content = t`${fg(theme.MUTE)("bal   ")}${fg(theme.GREEN)(formatBalance(s.balance))}`;
+    sessionRows[7]!.content = s.busy ? s.activity : ""; // working/stopping indicator (a static bullet, task 2)
+    sessionRows[7]!.height = s.busy ? 1 : 0;
+    sessionPanel.height = (s.branch ? 7 : 6) + (s.busy ? 1 : 0) + 2; // cwd + 5 stats (+branch) (+indicator) + border
     renderTodoSummary(s.todos);
 
     // skills panel: skills loaded into context now — always-on defaults + active language packs (D24/D29).
@@ -291,13 +285,12 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     },
     render,
     setActivity(chunk: Content) {
-      if (box.width > 0) sessionRows[5]!.content = chunk;
+      if (box.width > 0) sessionRows[7]!.content = chunk; // the indicator row (after cwd/branch/model/mode/cost/ctx/bal)
     },
     setVisible(visible: boolean) {
       box.width = visible ? SIDEBAR_W : 0;
     },
     retheme() {
-      cwdPanel.borderColor = theme.CYAN;
       sessionPanel.borderColor = theme.CYAN;
       todosPanel.borderColor = theme.ACCENT;
       skillsPanel.borderColor = theme.MAGENTA;
