@@ -22,10 +22,12 @@ bun index.ts --resume last   # resume the most recent session (from ~/.nerve/pro
 bun run test             # bun test ./tests/ — our suite (scoped; references/ is NOT a test root)
 bun test ./tests/stream.test.ts   # run one file
 # NB: bare `bun test` scans the whole tree incl. references/ — always scope to ./tests/
-bun run typecheck        # tsc --noEmit (no build step exists — Bun runs .ts directly)
+bun run typecheck        # tsc --noEmit (no compile/bundle step — Bun runs .ts directly)
+bun run build            # install a launcher to ~/.local/bin/nerve (NOT a compiled binary, D35)
 ```
 
-Run `bun run typecheck` before declaring a change done. There is no compile/bundle step.
+Run `bun run typecheck` before declaring a change done. There is no compile/bundle step: `bun run build`
+just drops a launcher that runs the repo's `index.ts`, so hot-reload + prompt hot-swap keep working (D35).
 
 ## Configuration
 

@@ -836,6 +836,28 @@ round" (which can stop early on a todo that legitimately spans turns).
 
 ---
 
+## D35 — Distribution: a launcher on PATH, never a compiled binary
+**Decision.** `bun run build` (= `bun scripts/install.ts`) installs nerve by writing a thin launcher to
+`~/.local/bin/nerve` that does `exec bun "<repo>/index.ts" "$@"`. nerve is **never** shipped as a
+`bun build --compile` standalone binary.
+**Why.** nerve resolves its own assets — `prompts/`, `config/`, `docs/`, `skills/` — fresh from disk via
+`import.meta.dir`, and hot-swaps `src/tools/` + `interceptors.ts` through cache-busted dynamic `import()`
+([D7](#d7--self-hacking-runtime-hot-swap-of-seams)). `--compile` bakes everything into the read-only
+`/$bunfs` virtual FS: runtime reads of `import.meta.dir`-relative paths then resolve to `/$bunfs/...` and
+fail (first symptom in the wild: `ENOENT /$bunfs/config/models.json`), and with no on-disk source to
+re-import, `/reload` and the system-prompt hot-swap are dead. A launcher keeps the self-hackable design
+([D1](#d1--primary-purpose-personal-coding-agent), [D7](#d7--self-hacking-runtime-hot-swap-of-seams),
+[D11](#d11--bootstrapping-claude-code-builds-a-trustworthy-kernel-then-nerve-self-hosts)) intact while still
+putting nerve on PATH: the **user's** project resolves via `process.cwd()`, **nerve's** assets via the repo,
+so it runs from any directory.
+**Rejected.** `bun build --compile` (freezes the hot-swap seams — the entire point of nerve); embedding
+assets via static `import` to satisfy compile (fixes the crash but still kills `/reload` + prompt hot-swap
+and bloats the bundle).
+**Phase.** Built (Phase 1.5). The launcher hard-codes the repo path; re-run `bun run build` from the repo
+if you move it.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a live **animated working indicator** (spinner + `working`) while
