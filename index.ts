@@ -155,7 +155,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
 // --- boot -------------------------------------------------------------------
 preflight();
 ensureLayout(); // create ~/.nerve/{skills,commands} + this workspace's dirs (D22)
-await loadTools(); // D38: discover the tool set from src/tools/ before any toolSpecs()/dispatch read it
+const toolsReady = loadTools(); // D45: kick off tool discovery now so its import I/O overlaps the sync boot below
 const models = loadModels();
 const entry = selectModel(models, arg("--model"));
 let provider: Provider;
@@ -178,6 +178,7 @@ const session = new Session(resumeId ? { id: resumeId, resume: true } : {});
 const thinking = entry.thinking ?? false; // D11 kernel default: thinking off
 const fallbacks = fallbacksFor(models, entry); // D15 model ladder
 const lsp = noLsp ? undefined : new Lsp(process.cwd()); // D10: diagnostics-on-edit + the `lsp` tool
+await toolsReady; // D38: tools must be discovered before any toolSpecs()/dispatch read the registry
 
 if (prompt) {
   // one-shot

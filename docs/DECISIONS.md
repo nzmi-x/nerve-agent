@@ -1125,6 +1125,19 @@ sandwich" reliability math assumes no ground-truth oracle; a compiler *is* one.
 PEV phase-gate (couples to the rejected phase idea, D39).
 **Phase.** Built — prompt-only (`prompts/system.md`). Delivers D37 idea 9.
 
+## D45 — Startup sliver: overlap tool discovery with the synchronous boot (idea 12)
+**Decision.** Kick off `loadTools()` (the one async boot step, D38) **before** the synchronous boot work
+(`loadModels`, `selectModel`, `providerFor`, the session + LSP construction) and `await` it just before the
+first `toolSpecs()`/dispatch. Its dynamic-import I/O then overlaps the sync setup. **No** LSP prefetch —
+servers stay lazy-per-language (D10), and the language isn't known until a file is touched anyway.
+**Why.** The surveyed idea (pre-spawn at module load) mostly contradicted nerve's lazy-LSP design; the
+accepted "sliver" was to parallelize boot async work. On inspection the literal "preflight ∥ config-load" is a
+no-op (both synchronous), so the only real overlap available is the tool-discovery imports vs. the sync setup
+— a micro-optimization, recorded for honesty more than speed.
+**Rejected.** Pre-spawning LSP servers (fights lazy-per-language, D10; wasteful for unused languages);
+pre-warming the session DB (already opened at `Session` construction).
+**Phase.** Built (`index.ts` boot). Delivers D37 idea 12.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
