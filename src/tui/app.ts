@@ -1174,7 +1174,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    herdrReport("done"); // herdr telemetry: nerve is exiting (fire-and-forget, before the awaits below)
+    // (No herdr report on exit: "done" isn't a valid herdr state, and the pane closes on exit so herdr
+    //  detects PaneExited itself — a fire-and-forget report wouldn't flush before process.exit anyway.)
     turnAbort?.abort();
     clearTransient(); // cancel the pending tools/subagents auto-hide (no render after destroy)
     themeMonitor?.kill(); // stop following the system theme (D30)

@@ -1263,18 +1263,25 @@ render are load-verified (no TTY in CI).
 ---
 
 ## D51 — herdr integration: report nerve's state to the herdr multiplexer (Stage 1)
-**Decision.** nerve reports its lifecycle state — `working` / `idle` / `blocked` / `done` — to
+**Decision.** nerve reports its lifecycle state — `working` / `idle` / `blocked` — to
 [herdr](https://github.com)'s Unix control socket, so herdr's sidebar shows nerve's real-time status beside
 its other agents. `src/herdr.ts` `herdrReport(state)` is **implicit telemetry, not a tool** (the model never
 drives it): a **no-op unless `$HERDR_PANE_ID` is set** (herdr sets it in panes it spawns), it `Bun.connect`s
 to `$HERDR_SOCKET_PATH` (or `~/.config/herdr/herdr.sock`), writes **one newline-delimited JSON-RPC line**
 (`pane.report_agent`), and is **fire-and-forget** — the promise is never awaited and its rejection swallowed
 (herdr may be down). Hooks in `app.ts`: turn start→`working`, turn end→`idle`, `ask_user`→`blocked`
-(answered→`working`), ESC→`idle`, `/compact`→`working`/`idle`, shutdown→`done` (sent first, before the
-teardown awaits).
-**Why.** herdr already auto-detects nerve by process name + terminal output, but can't tell `working` from
-`idle`. A ~50-line socket reporter closes that gap for anyone who runs nerve under herdr, at zero cost to
-everyone who doesn't (the `$HERDR_PANE_ID` guard). This was the graduated [PLANS.md](PLANS.md) spec.
+(answered→`working`), ESC→`idle`, `/compact`→`working`/`idle`. **No report on exit** — `done` is not a valid
+herdr state (the server rejects it; valid: `idle`/`working`/`blocked`/`unknown`) and herdr detects `PaneExited`
+on its own.
+**Custom harness, confirmed.** herdr's built-in integrations are a fixed list (claude/codex/copilot/…), but
+`pane.report_agent` takes an **arbitrary `agent` label** — so nerve surfaces as its own `nerve` agent without
+being on that list. **Verified against the running server:** driving `herdrReport` (and the `herdr pane
+report-agent` CLI) made `herdr agent list` show a `nerve` agent beside `claude`; the legacy `$HERDR_PANE_ID`
+(`p_10`) is accepted and resolved. A running nerve must be **restarted** to start reporting (`herdr.ts` is
+engine-loaded, not in the hot-swap set).
+**Why.** herdr already auto-detects *some* agents by process name + terminal output, but not nerve, and can't
+tell `working` from `idle`. A ~50-line socket reporter closes that gap for anyone who runs nerve under herdr,
+at zero cost to everyone who doesn't (the `$HERDR_PANE_ID` guard). This was the graduated [PLANS.md](PLANS.md) spec.
 **Charter fit.** This is **not** MCP/ACP/A2A (intentionally excluded) — it's one-way, opt-in, fire-and-forget
 status telemetry over a local Unix socket, with no model surface and no protocol coupling. It can't block or
 fail a turn.

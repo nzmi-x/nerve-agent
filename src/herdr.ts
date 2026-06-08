@@ -1,11 +1,14 @@
 // Herdr integration (docs/PLANS.md → graduated). Report nerve's lifecycle state to herdr's Unix socket so
-// herdr's sidebar shows nerve as working / idle / blocked / done alongside its other agents. This is
+// herdr's sidebar shows nerve as working / idle / blocked alongside its other agents. This is
 // implicit telemetry, NOT a tool: fire-and-forget, never blocks a turn, and a silent no-op unless nerve was
 // launched inside a herdr pane (`$HERDR_PANE_ID`). herdr not running → the connect rejects instantly, ignored.
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export type HerdrState = "working" | "idle" | "blocked" | "done";
+// herdr's valid pane agent states (verified against the running server — it rejects anything else, e.g.
+// `done`: "invalid pane agent state ... expected idle, working, blocked, or unknown"). nerve emits the first
+// three; `unknown` exists in herdr but nerve always knows its own state, so it never sends it.
+export type HerdrState = "working" | "idle" | "blocked";
 
 /** The herdr pane nerve runs in, or null when it wasn't launched by herdr (→ nothing to report to). */
 export function herdrPaneId(): string | null {
