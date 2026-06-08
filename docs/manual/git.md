@@ -15,7 +15,10 @@ and the +/- diff shown when the agent edits a file.
   (consistent with the `SAFE_GIT` set in `dispatch.ts`).
 - **Location panel** (top of the sidebar): `shortenPath(cwd)` (`$HOME → ~`, deep paths → `…/last/three`) +
   `⎇ branch · ● dirty · ↑a ↓b`. Branch + status are cached in `app.ts` (`refreshGit`) and refreshed at
-  startup / after each turn / on Ctrl+G.
+  startup, on Ctrl+G, and after **anything that can change git state** — every turn, the `!`-shell escape,
+  and each `bash`/`edit`/`write` tool result (so a commit or working-tree change shows **live**, not only at
+  turn end). `refreshGit` **coalesces**: a burst of edits collapses to the in-flight run + one trailing run,
+  so it never spawns N `git status` subprocesses at once.
 - **Git view** (`Ctrl+G` or `/git`): the sidebar's bottom flex-grow slot **swaps `files` ↔ `git`**
   (`bottomView`; `setBottom` add/removes the panel from the layout — a bordered box can't collapse to height
   0). The git panel shows the branch/status header,

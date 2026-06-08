@@ -1203,8 +1203,10 @@ should see).
 2. **Git view** (`Ctrl+G` / `/git`): the sidebar's bottom flex-grow slot **swaps `files` ↔ `git`** — a
    a branch/status header + a `git log --graph --all` of how the branches relate (rail · hash · subject),
    capped to the panel height. A **toggle** (files stays a keystroke away), not a permanent replace, no
-   overlay. Data via `gitStatus` + `gitGraph`, cached in `app.ts` and refreshed at startup, after each turn,
-   and on Ctrl+G (the graph only while the view is open — it's a subprocess).
+   overlay. Data via `gitStatus` + `gitGraph`, cached in `app.ts` and refreshed at startup, on Ctrl+G, and
+   after anything that can change git state — every turn, the `!`-shell escape, and each `bash`/`edit`/`write`
+   tool result (so a commit shows **live**, coalesced so a burst of edits is cheap; the graph only when the
+   view is open — it's a subprocess).
 3. **Inline agent-edit diffs** (like Claude Code, **not** `git diff`): `edit`/`write` already hold old + new,
    so they call a new `ctx.onFileChange(path, old, new)` display hook; the TUI renders `diffRows(old, new)` (a
    tiny zero-dep LCS line differ, `src/diff.ts`) as **colored, line-numbered +/- rows** under a bold filename

@@ -316,13 +316,31 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     });
   }
   // D49: refresh cached git data — branch + status always (cheap), branches/log only when the git view is
-  // shown (subprocesses). Called at startup, after each turn, and on Ctrl+G; then repaints the sidebar.
+  // shown (subprocesses). Called at startup, on Ctrl+G, and after anything that can change git state — every
+  // turn, the `!`-shell escape, and each `bash`/`edit`/`write` tool result (so commits + working-tree changes
+  // show live, not only at turn end). Coalesced: a burst of edits collapses to the in-flight run + one trailing
+  // run, so we never spawn N `git status` subprocesses at once (also avoids out-of-order `gitData` writes).
+  let gitRefreshing = false;
+  let gitRefreshAgain = false;
   async function refreshGit(): Promise<void> {
-    const branch = gitBranch(cwd);
-    const status = await gitStatus(cwd);
-    const graph = bottomView === "git" ? await gitGraph(cwd, 24) : gitData.graph; // graph only while the view is open
-    gitData = { branch, status, graph };
-    renderSidebar();
+    if (gitRefreshing) {
+      gitRefreshAgain = true; // a refresh is already running — fold this request into one trailing run
+      return;
+    }
+    gitRefreshing = true;
+    try {
+      const branch = gitBranch(cwd);
+      const status = await gitStatus(cwd);
+      const graph = bottomView === "git" ? await gitGraph(cwd, 24) : gitData.graph; // graph only while the view is open
+      gitData = { branch, status, graph };
+      renderSidebar();
+    } finally {
+      gitRefreshing = false;
+      if (gitRefreshAgain) {
+        gitRefreshAgain = false;
+        void refreshGit(); // coalesced trailing refresh — picks up whatever changed while we were busy
+      }
+    }
   }
   // Subagent lifecycle (D6) → the subagents panel. Pushed on start, flipped on end.
   const onSubagent = (ev: SubagentEvent): void => {
@@ -618,6 +636,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     } catch (e) {
       sysErr(e instanceof Error ? e.message : String(e));
     }
+    void refreshGit(); // a `!git commit`/`checkout`/… just ran — reflect it in the git UI
   }
 
   // D17: summarize old turns into one message to reclaim context. Manual for now; ESC cancels.
@@ -1084,6 +1103,9 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           const tc = toolCalls.find((c) => c.id === id); // match by id — read-only calls finish out of order
           if (tc) tc.status = ok ? "ok" : "err"; // ✓ / ✗
           renderSidebar();
+          // a mutating tool may have changed git state (a `git` commit via bash, or the working tree via
+          // edit/write) — refresh the git UI live, not just at turn end (coalesced, so a burst is cheap).
+          if (ok && (name === "bash" || name === "edit" || name === "write")) void refreshGit();
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
           if ((name === "edit" || name === "write") && ok) return; // D49: the inline diff (onFileChange) is its visual
           // `⎿ name  <arg>` — name + glyph colored by outcome (cyan/green ok, red error); on failure the
