@@ -46,9 +46,12 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
 - `todo` ([D25](../DECISIONS.md)) — the agent's task list for multi-step work (pass the full list each
   call). `readonly` → PLAN-safe (only UI state). Shown via `ctx.setTodos`: a **pinned colored panel**
   in the TUI, a printed checklist headless.
-- `fetch` ([D28](../DECISIONS.md)) — Bun-native HTTP GET of a URL → **HTML to Markdown**, JSON
-  pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` → PLAN-safe. Times out + skips
-  downloads over 5 MB + binary. Export is `fetchTool` (avoids shadowing global `fetch`).
+- `fetch` ([D28](../DECISIONS.md), SPA rendering [D54](../DECISIONS.md)) — Bun-native HTTP GET of a URL →
+  **HTML to Markdown**, JSON pretty-printed, text as-is (`htmlToMarkdown` is pure/tested). `readonly` →
+  PLAN-safe. Times out + skips downloads over 5 MB + binary. **JS-rendered pages (SPAs):** when a plain fetch
+  comes back as a near-empty shell (`looksUnrendered`), it auto-renders in `Bun.WebView` (headless Chrome,
+  zero deps — D54) and uses the rendered DOM; `render:true` forces it, `render:false` disables it. No browser
+  on the box → it degrades to the plain result. Export is `fetchTool` (avoids shadowing global `fetch`).
 - `search` ([D33](../DECISIONS.md)) — a thin sibling of `fetch` for when there's **no URL**: GETs
   `lite.duckduckgo.com/lite/?q=…` (minimal JS-free HTML) and parses the rows into a ranked
   `{title, url, snippet}` list; the agent then `fetch`es a result to read it. Unwraps DDG's `/l/?uddg=`

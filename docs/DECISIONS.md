@@ -1347,6 +1347,28 @@ attach test. Manuals: `providers.md`, `tui.md`.
 
 ---
 
+## D54 — `fetch` renders SPAs via Bun's headless browser
+**Decision.** The `fetch` tool gains JS-rendering for single-page apps. A plain GET returns an SPA's empty
+shell (the content is drawn client-side), so when the fetched HTML `looksUnrendered` — `htmlToMarkdown` came
+back under ~200 chars yet the page shipped `<script>` — `fetch` **auto-renders** the page in **`Bun.WebView`**
+(Bun's built-in headless browser: WKWebView on macOS, a system Chrome/Chromium on Linux/Windows, **zero deps**)
+and reads the rendered DOM (`renderPage` → `document.documentElement.outerHTML` → `htmlToMarkdown`). `render:true`
+forces the browser; `render:false` disables it. `renderPage` navigates (racing a 25s timeout so a never-loading
+page can't hang), settles by polling until the body text stops growing, then extracts — closing the tab after.
+**Why.** Modern docs/dashboards are SPAs; a plain fetch reads nothing. Bun shipped a headless browser as a
+runtime built-in, so we get real rendering **without Puppeteer/Playwright** — squarely the "don't add a dep for
+what Bun already does" rule. The auto-shell-detect means static pages + JSON pay nothing (no browser spawned).
+**PLAN-safe.** Still `readonly: true` — rendering only *reads* a page (sandboxed, ephemeral, headless Chrome,
+closed after); no local FS/shell mutation, same intent as the existing GET.
+**Risks / degradation.** `Bun.WebView` is **experimental** (may change) and Chrome must be installed on Linux —
+both fail *gracefully*: a render error is caught and the **plain-fetch result is kept** (auto path), or returns
+a clear "no headless browser?" message (`render:true`). Chrome is spawned once per process + killed at exit.
+**Phase.** Built. `renderPage`/`looksUnrendered` + the `render` param in `src/tools/fetch.ts`. Tests:
+`tests/fetch.test.ts` (`looksUnrendered`); the live render is smoke-verified (needs a browser, not in CI).
+Manual: `tools.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a

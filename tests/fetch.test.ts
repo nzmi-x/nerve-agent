@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { htmlToMarkdown, fetchTool } from "../src/tools/fetch.ts";
+import { htmlToMarkdown, fetchTool, looksUnrendered } from "../src/tools/fetch.ts";
 
 test("htmlToMarkdown: headings/links/lists/code/bold; drops chrome; decodes entities", () => {
   const md = htmlToMarkdown(`
@@ -28,4 +28,12 @@ test("fetch tool: validates url, readonly (PLAN-safe)", async () => {
   expect(await fetchTool.run({ url: 123 as unknown as string }, { cwd: "." })).toContain("must be a string");
   expect(fetchTool.readonly).toBe(true);
   expect(fetchTool.name).toBe("fetch");
+});
+
+test("looksUnrendered: a sparse SPA shell with scripts → true; real content / no scripts → false (D54)", () => {
+  expect(looksUnrendered('<html><body><div id="root"></div><script src="app.js"></script></body></html>', "")).toBe(true);
+  // a real article: lots of extracted text → no need to render, even with scripts
+  expect(looksUnrendered("<body><script>x()</script>...</body>", "A".repeat(500))).toBe(false);
+  // sparse but no scripts → it's just a small static page, not an SPA shell
+  expect(looksUnrendered("<body><p>hi</p></body>", "hi")).toBe(false);
 });

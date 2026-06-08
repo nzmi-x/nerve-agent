@@ -46,20 +46,76 @@ export function htmlToMarkdown(html: string): string {
   return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
 }
 
+// --- SPA rendering (D54): a plain GET returns an SPA's empty shell (content is drawn client-side). Render
+// the page in Bun's built-in headless browser (`Bun.WebView` — WKWebView on macOS, a system Chrome elsewhere,
+// zero deps) and read the *rendered* DOM instead. Best-effort: throws if no headless browser is available.
+const RENDER_NAV_TIMEOUT_MS = 25_000; // cap a page that never fires `load`
+const RENDER_SETTLE_MS = 250; // poll interval while client-rendered content settles
+
+/** Render `url` in a headless browser and return the rendered HTML (so SPAs yield real content, not a shell). */
+export async function renderPage(url: string): Promise<string> {
+  const view = new Bun.WebView({ width: 1280, height: 2000 });
+  try {
+    // `navigate` resolves on `load`; race a timeout so a never-loading page can't hang the tool. Even if
+    // `load` never fires, the DOM is usually populated — we read whatever's there. (Different op-slots, so
+    // `evaluate` works while a navigate is still pending.)
+    await Promise.race([view.navigate(url).catch(() => {}), Bun.sleep(RENDER_NAV_TIMEOUT_MS)]);
+    // SPA content often paints AFTER `load` (async data fetch) — wait until the body text stops growing.
+    let prev = -1;
+    let stable = 0;
+    for (let i = 0; i < 24 && stable < 2; i++) {
+      await Bun.sleep(RENDER_SETTLE_MS);
+      const len = Number(await view.evaluate("document.body ? document.body.innerText.length : 0")) || 0;
+      if (len === prev) stable++;
+      else ((stable = 0), (prev = len));
+    }
+    return String((await view.evaluate("document.documentElement.outerHTML")) ?? "");
+  } finally {
+    view.close(); // closes this tab (rejects the pending navigate, already .catch()'d); Chrome is reused + killed at exit
+  }
+}
+
+/** Pure: does this HTML look like an *unrendered SPA shell* — almost no extractable text, yet it shipped
+ *  scripts (the content is drawn client-side)? Then a headless render will get the real content. */
+export function looksUnrendered(rawHtml: string, markdown: string): boolean {
+  return markdown.trim().length < 200 && /<script\b/i.test(rawHtml);
+}
+
 export const fetchTool: Tool = {
   name: "fetch",
   description:
     "Fetch a URL over HTTP(S) GET and return its content for reading — HTML is converted to Markdown " +
-    "(smaller + readable), JSON is pretty-printed, other text is returned as-is. Use for docs, web pages, or JSON APIs.",
+    "(smaller + readable), JSON is pretty-printed, other text is returned as-is. JavaScript-rendered pages " +
+    "(SPAs) auto-upgrade to a headless-browser render when a plain fetch comes back near-empty; set " +
+    "render:true to force the browser, render:false to disable it. Use for docs, web pages, or JSON APIs.",
   parameters: {
     type: "object",
-    properties: { url: { type: "string", description: "The http(s) URL to fetch." } },
+    properties: {
+      url: { type: "string", description: "The http(s) URL to fetch." },
+      render: {
+        type: "boolean",
+        description:
+          "Render the page in a headless browser (for SPAs / JS-heavy sites that return little content with a plain fetch). " +
+          "Omit for the default: a plain fetch that auto-renders only when the page looks like an unrendered SPA shell.",
+      },
+    },
     required: ["url"],
   },
-  readonly: true, // a GET for info-gathering → usable in PLAN
+  readonly: true, // a GET for info-gathering (render just reads the page in a sandboxed browser) → usable in PLAN
   async run(args) {
     if (typeof args.url !== "string") return "Error: 'url' must be a string";
+    const render = typeof args.render === "boolean" ? args.render : undefined;
     const url = /^https?:\/\//i.test(args.url.trim()) ? args.url.trim() : `https://${args.url.trim()}`;
+
+    // render:true → straight to the headless browser (SPAs / JS-heavy pages), skip the plain fetch.
+    if (render === true) {
+      try {
+        const md = htmlToMarkdown(await renderPage(url)).trim();
+        return `${url}\n\n${md || "(rendered, but no readable content)"}`;
+      } catch (e) {
+        return `Error rendering ${url}: ${e instanceof Error ? e.message : String(e)} — no headless browser? (install Chrome/Chromium)`;
+      }
+    }
 
     let res: Response;
     try {
@@ -93,6 +149,18 @@ export const fetchTool: Tool = {
       out = raw;
     }
     out = out.trim();
+
+    // Auto-upgrade (D54): an HTML page that came back as an unrendered SPA shell → render it in the headless
+    // browser and use that if it got more content. `render:false` opts out; non-browser machines keep the plain result.
+    if (render !== false && type.includes("html") && looksUnrendered(raw, out)) {
+      try {
+        const rendered = htmlToMarkdown(await renderPage(url)).trim();
+        if (rendered.length > out.length) out = rendered;
+      } catch {
+        /* no headless browser available → keep the plain-fetch result */
+      }
+    }
+
     return `${url}\n\n${out || "(empty response)"}`;
   },
 };
