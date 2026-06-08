@@ -581,12 +581,15 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const s = meter.snapshot();
     const badge = mode === "edit" ? bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT ")) : bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "));
     // cwd + git branch live in the sidebar's session panel; the status bar (under the input box) is the only
-    // place they'd show when the sidebar is hidden, so mirror them here (task 3). Flat chunks only — a nested
-    // `t` renders as "[object Object]" — so each branch piece is its own conditional interpolation.
+    // place they'd show when the sidebar is hidden, so mirror them here (task 3) — rendered **identically** to
+    // the sidebar's branch row: cwd in FG, then `⎇ branch · ●dirty/✓clean · ↑ahead ↓behind`. Flat chunks only
+    // (a nested `t` renders as "[object Object]"), so each piece is its own conditional interpolation.
+    const ahead = gitData.status?.ahead, behind = gitData.status?.behind;
     const arrow = gitData.branch ? fg(theme.MAGENTA)("⎇") : "";
     const branch = gitData.branch ? fg(theme.FG)(` ${gitData.branch}`) : "";
     const dirty = gitData.branch ? (gitData.status?.dirty ? fg(theme.YELLOW)(` ●${gitData.status.dirty}`) : fg(theme.GREEN)(" ✓")) : "";
-    status.content = t` ${fg(theme.MUTE)(shortenPath(cwd))} ${arrow}${branch}${dirty}  ${fg(theme.DIM)("│")}  ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
+    const ab = gitData.branch && (ahead || behind) ? fg(theme.MUTE)(`${ahead ? ` ↑${ahead}` : ""}${behind ? ` ↓${behind}` : ""}`) : ""; // matches sidebar `aheadBehind`
+    status.content = t` ${fg(theme.FG)(shortenPath(cwd))} ${arrow}${branch}${dirty}${ab}  ${fg(theme.DIM)("│")}  ${fg(theme.ACCENT)(active.id)}  ${badge}  ${fg(theme.MUTE)("cost")} ${fg(theme.FG)(formatCost(s.costUsd))}  ${fg(theme.MUTE)("ctx")} ${fg(theme.FG)(formatContext(s.contextTokens, active.contextWindow))}  ${fg(theme.MUTE)("bal")} ${fg(theme.GREEN)(formatBalance(balance))}${steerQueue.length ? fg(theme.YELLOW)(`  ↳${steerQueue.length} queued`) : ""}${busy ? activityChunk(true) : ""}`;
     renderSidebar(); // mirror the same stats into the sidebar (no-op when hidden)
   };
 
