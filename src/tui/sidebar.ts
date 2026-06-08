@@ -80,9 +80,18 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => theme.YELLOW);
   // Bottom flex-grow slot: files OR git (D49). Both non-grow; render() sets the active one's flexGrow, the
   // other collapses to height 0.
-  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE);
-  const gitPanel = mkPanel("gitPanel", " git ", () => theme.GREEN);
-  for (const p of [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel, gitPanel]) box.add(p);
+  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE, true);
+  const gitPanel = mkPanel("gitPanel", " git ", () => theme.GREEN, true);
+  // Only the ACTIVE bottom panel sits in the layout — a bordered box can't collapse to height 0 (the border
+  // has a min height), so we add/remove to truly hide the other rather than resize it. Starts on files.
+  for (const p of [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) box.add(p);
+  let bottomShown: "files" | "git" = "files";
+  const setBottom = (view: "files" | "git"): void => {
+    if (view === bottomShown) return;
+    box.remove(bottomShown === "files" ? "filesPanel" : "gitPanel");
+    box.add(view === "files" ? filesPanel : gitPanel);
+    bottomShown = view;
+  };
   const CWD_ROWS = 2; // path + branch
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
@@ -216,19 +225,10 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
     subagentsPanel.height = Math.max(1, subWin.length) + 2;
 
-    // bottom flex-grow slot (D49): files OR git, by `bottomView`. The inactive panel collapses to height 0.
-    const git = s.bottomView === "git";
-    filesPanel.flexGrow = git ? 0 : 1;
-    gitPanel.flexGrow = git ? 1 : 0;
-    if (git) {
-      filesPanel.height = 0;
-      for (const r of fileRows) r.height = 0;
-      renderGit(s);
-    } else {
-      gitPanel.height = 0;
-      for (const r of gitRows) r.height = 0;
-      renderFiles(s);
-    }
+    // bottom flex-grow slot (D49): files OR git — only the active panel is in the layout (Ctrl+G swaps it in).
+    setBottom(s.bottomView);
+    if (s.bottomView === "git") renderGit(s);
+    else renderFiles(s);
   }
 
   // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
