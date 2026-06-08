@@ -4,7 +4,7 @@
 import { pipe, type Interceptor } from "./stream.ts";
 import { dispatch, isReadOnlyTool, type Mode } from "./dispatch.ts";
 import { isTransient, isContextOverflow, backoffMs, sleep } from "./retry.ts";
-import type { Message, Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec } from "./providers/types.ts";
+import type { Message, Provider, ProviderRequest, StreamEvent, ToolCall, ToolSpec, ImageInput } from "./providers/types.ts";
 import type { Session } from "./session.ts";
 import type { ToolContext } from "./tools/types.ts";
 import type { Effort } from "./effort.ts";
@@ -40,6 +40,8 @@ export interface LoopOptions {
   status?: () => string;
   effort?: Effort;
   temperature?: number;
+  /** Inline images for THIS turn (D53) — attached to each round's request, never persisted. Gemini-only. */
+  images?: ImageInput[];
   /** Model-ladder fallbacks tried (delay 0) before backing off on a transient error (D15). */
   fallbacks?: Candidate[];
   retry?: RetryPolicy;
@@ -81,6 +83,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
       ...(opts.tools ? { tools: opts.tools } : {}),
       ...(cand.effort !== undefined ? { effort: cand.effort } : {}),
       ...(cand.temperature !== undefined ? { temperature: cand.temperature } : {}),
+      ...(opts.images?.length ? { images: opts.images } : {}), // D53: same images on every round of this turn
     };
 
     // One controller per turn: ESC (opts.signal) and a stop-guard's ctl.abort() both feed it, and it

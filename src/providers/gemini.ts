@@ -75,6 +75,18 @@ export function buildRequestBody(req: ProviderRequest): Record<string, unknown> 
     body.generationConfig = { thinkingConfig: { thinkingLevel: req.effort, includeThoughts: true } };
   }
 
+  // Image input (D53, §6): attach inline images to the CURRENT prompt — the most recent user turn that
+  // carries text (not a tool-result turn, whose parts are functionResponses). Request-scoped; not persisted.
+  if (req.images?.length) {
+    for (let k = contents.length - 1; k >= 0; k--) {
+      const parts = contents[k]!.parts as Record<string, unknown>[] | undefined;
+      if (contents[k]!.role === "user" && parts?.some((p) => "text" in p)) {
+        for (const img of req.images) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+        break;
+      }
+    }
+  }
+
   return body;
 }
 

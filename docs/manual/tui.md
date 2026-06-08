@@ -84,7 +84,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   (`busy=false`). `aborting` resets at the start of the next turn.
 - **Affordances** ([D14](../DECISIONS.md)): `@path` autocompletes files (reference-only); `!cmd` runs
   shell with **full authority, ungated, not added to the session**; `/cmd` runs a command. Autosuggest
-  popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
+  popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions). An `@`-ref to an **image**
+  (`.png/.jpg/.webp/.heic/.heif`) **attaches it to a Gemini turn** ([D53](../DECISIONS.md)): `submit`'s
+  `prepareImages` reads the bytes (request-scoped, not persisted), swaps the ref for a `[image: name]`
+  placeholder, and threads it to the turn; on a text-only model (DeepSeek) it's dropped with a warning.
 - **Paste shortening:** a long (>200 char) or multi-line paste collapses to a `[Pasted N lines #id]`
   token **at the cursor** (so the caret moves past it and you keep typing), with the full text stashed
   under that id. On send, `expandPastes` substitutes each surviving token back **by id** — so dropping a

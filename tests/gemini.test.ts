@@ -43,6 +43,28 @@ test("buildRequestBody: effort off/absent → no generationConfig (model default
   expect(buildRequestBody({ model: "m", messages: [{ role: "user", content: "x" }] }).generationConfig).toBeUndefined();
 });
 
+test("buildRequestBody: images attach as inlineData on the current prompt, not a tool-result turn (D53)", () => {
+  const body = buildRequestBody({
+    model: "m",
+    messages: [
+      { role: "user", content: "describe @shot.png" },
+      { role: "assistant", content: "", toolCalls: [{ id: "fc_1", name: "read", args: "{}", signature: "S" }] },
+      { role: "tool", toolCallId: "fc_1", content: "ok" }, // a later user turn carries functionResponse, not text
+    ],
+    images: [{ mimeType: "image/png", data: "BASE64" }],
+  });
+  const contents = body.contents as Record<string, unknown>[];
+  // the prompt turn (index 0) gets the image appended after its text part
+  expect(contents[0]).toEqual({ role: "user", parts: [{ text: "describe @shot.png" }, { inlineData: { mimeType: "image/png", data: "BASE64" } }] });
+  // the tool-result user turn (index 2) is untouched (no inlineData)
+  expect(JSON.stringify(contents[2])).not.toContain("inlineData");
+});
+
+test("buildRequestBody: no images → no inlineData parts", () => {
+  const body = buildRequestBody({ model: "m", messages: [{ role: "user", content: "hi" }] });
+  expect(JSON.stringify(body.contents)).not.toContain("inlineData");
+});
+
 test("buildRequestBody: tool turn replays thoughtSignature on first call; results merge into one user turn", () => {
   const body = buildRequestBody({
     model: "m",

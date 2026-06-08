@@ -39,7 +39,9 @@ import { firstLine, trunc, rel, displayPath, shortenPath } from "./format.ts";
 import { herdrReport } from "../herdr.ts";
 import { createSidebar, SIDEBAR_MIN } from "./sidebar.ts";
 import { PLAN_NOTE, type Mode } from "../dispatch.ts";
-import type { Message, Provider } from "../providers/types.ts";
+import type { Message, Provider, ImageInput } from "../providers/types.ts";
+import { imageRefs, imageMime, imagePlaceholder } from "../images.ts";
+import { resolve } from "node:path";
 import type { AskRequest, Todo, SubagentEvent } from "../tools/types.ts";
 import type { Lsp } from "../lsp/manager.ts";
 import { Session } from "../session.ts";
@@ -791,7 +793,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/quit", "exit nerve");
     spacer();
     sec("input");
-    cmd("@path", "reference a file");
+    cmd("@path", "reference a file  ·  @img.png attaches an image (Gemini)");
     cmd("!cmd", "run a shell command directly (full authority)");
     cmd("/name", "a built-in command or a skill");
     spacer();
@@ -905,6 +907,35 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
   }
 
+  // D53: Gemini image input. Pull `@image.png` refs out of the prompt → read the bytes (request-scoped, not
+  // persisted) and swap the ref for a `[image: name]` placeholder in the model text. Gemini-only; on a
+  // text-only model (DeepSeek) the images are dropped with a warning. The image API caps a request at 20MB.
+  const MAX_IMAGE_BYTES = 7_000_000; // ~9.3MB base64 — a couple of these stay safely under the 20MB request cap (§6)
+  async function prepareImages(text: string): Promise<{ modelText: string; images: ImageInput[] }> {
+    const refs = imageRefs(text);
+    if (!refs.length) return { modelText: text, images: [] };
+    if (active.provider !== "gemini") {
+      sysWarn(`${refs.length} image${refs.length === 1 ? "" : "s"} ignored — ${active.id} is text-only; /model to a Gemini model to send images`);
+      return { modelText: text, images: [] };
+    }
+    let modelText = text;
+    const images: ImageInput[] = [];
+    for (const { token, path } of refs) {
+      const file = Bun.file(resolve(cwd, path));
+      if (!(await file.exists())) {
+        sysWarn(`image not found: ${path}`);
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        sysWarn(`image too large (${(file.size / 1e6).toFixed(1)}MB > ${MAX_IMAGE_BYTES / 1e6}MB): ${path}`);
+        continue;
+      }
+      images.push({ mimeType: imageMime(path)!, data: Buffer.from(await file.arrayBuffer()).toString("base64") });
+      modelText = modelText.replace(token, imagePlaceholder(path));
+    }
+    return { modelText, images };
+  }
+
   async function submit(value: string): Promise<void> {
     const raw = value.trim();
     input.setText("");
@@ -926,11 +957,12 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     }
     if (raw.startsWith("!")) return void runShell(expanded.slice(1));
     if (raw.startsWith("/")) return void runCommand(raw); // commands run literally (paste tokens pass through)
-    await sendPrompt(expanded, () => t`${bold(fg(theme.GREEN)("❯"))} ${raw}`); // echo the compact text, send the full
+    const { modelText, images } = await prepareImages(expanded); // D53: pull out @image.png → request-scoped bytes
+    await sendPrompt(modelText, () => t`${bold(fg(theme.GREEN)("❯"))} ${raw}`, images); // echo the literal text, send the placeholdered text + images
   }
 
   // Send a prompt to the agent: echo a transcript line, persist the (possibly longer) model text, run a turn.
-  async function sendPrompt(modelText: string, echo: () => Content): Promise<void> {
+  async function sendPrompt(modelText: string, echo: () => Content, images?: ImageInput[]): Promise<void> {
     if (busy) return;
     // New exchange → drop the previous turn's transient tools/subagents (they show "now", not a session log).
     clearTransient();
@@ -949,7 +981,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     addText(echo);
     spacer(); // breathing room before the assistant's answer
     session.addUser(modelText);
-    await runAgentTurn();
+    await runAgentTurn(undefined, images); // D53: the @image rides this first turn only (not auto-continue/steer)
     await drainSteer(); // D46: a redirect typed during the turn preempts auto-continue
     await autoContinue(); // D34: drive an unfinished todo list to completion (bounded), then flag any remainder
     await drainSteer(); // D46: catch a redirect typed during the last auto-continue round
@@ -1023,7 +1055,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   // One agent turn: stream → tools → post-edit hooks → (D24) hand failing checks back so the agent
   // triages + fixes. `prevIssues` is the prior turn's issue summary — if unchanged after an edit, the
   // agent's stuck, so we stop (no hardcoded retry cap; the agent's choice to stop editing ends it).
-  async function runAgentTurn(prevIssues?: string): Promise<void> {
+  async function runAgentTurn(prevIssues?: string, images?: ImageInput[]): Promise<void> {
     let reasoningLine: TextRenderable | null = null;
     // The assistant's prose is rendered lazily (created on the first text delta) and **sealed when a tool
     // call starts**, so the next step's prose opens a FRESH block *below* the tool-result lines — the
@@ -1100,6 +1132,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         system: sys,
         tools: toolSpecs(mode === "plan"), // D39: PLAN advertises only PLAN-visible tools (read-only + bash)
         status: () => formatModelStatus(meter.snapshot(), active.contextWindow, currentTodos), // D43: ambient tail note
+        images, // D53: Gemini inline images for this turn (undefined/empty on text-only models or no @image)
         effort,
         temperature: active.temperature,
         fallbacks: fallbacksFor(models, active), // D15: rate-limited model falls down the ladder

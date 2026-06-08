@@ -47,6 +47,9 @@
   signature (history that began on DeepSeek then `/model`-switched to Gemini, or a synthesized/older turn),
   `buildRequestBody` injects Google's documented **`skip_thought_signature_validator`** dummy so the replay
   can't 400 (§11); parallel/subsequent FCs correctly stay signatureless.
+- **Image input** ([D53](../DECISIONS.md), Gemini only): `ProviderRequest.images` (base64 `ImageInput[]`,
+  **request-scoped** — not persisted) → `buildRequestBody` appends `inlineData` parts to the current prompt's
+  user turn (§6). DeepSeek ignores `images`. The TUI fills it from `@image.png` refs (see [tui](tui.md)).
 - Live end-to-end needs `DEEPSEEK_API_KEY` / `GEMINI_API_KEY` in `.env` — the pure functions don't.
 
 **See:** [docs/providers.md](../providers.md) · [ARCHITECTURE_BRIEF §4](../ARCHITECTURE_BRIEF.md) · [stream](stream.md)

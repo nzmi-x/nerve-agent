@@ -1322,6 +1322,31 @@ signature-less first `functionCall` (§11), so a DeepSeek→Gemini `/model` swit
 
 ---
 
+## D53 — Gemini image input: request-scoped `@image.png`, no kernel change
+**Decision.** Support image input for Gemini models the **lean** way: an `@image.png` in a prompt rides on the
+**outgoing request only** (Gemini `inlineData`, §6), while the **session keeps a `[image: name]` placeholder**.
+So the kernel `Message` type stays a plain `string` and nothing binary is persisted. `ImageInput` (base64 +
+mime) lives on `ProviderRequest`/`LoopOptions` (request-scoped); `app.ts` `prepareImages` reads the `@`-ref
+bytes in `submit`, swaps the ref for the placeholder, and threads the images through `sendPrompt`→`runAgentTurn`
+→`loop`, which puts them on **every round of that one turn**. `gemini.ts` attaches `inlineData` to the current
+prompt's user turn (not a tool-result turn). DeepSeek (text-only) **ignores** images — `prepareImages` warns
+and drops them on a non-Gemini model. Per-image cap ~7MB (the API caps a request at 20MB). The pure ref/mime
+parsing is `src/images.ts`.
+**Why.** Image-to-code ("here's a screenshot, fix it") is the one multimodal capability that fits a coding
+agent, and the user works visually. But it's Gemini-only and the user's default is DeepSeek, so it shouldn't
+cost the kernel: the request-scoped design keeps `Message` a string, keeps the session DB lean (no base64),
+and degrades to a warning on DeepSeek.
+**Trade-off (accepted).** **No multi-turn image memory** — the bytes are attached to the first turn of an
+exchange only (not auto-continue/steer rounds, not persisted). Re-reference the file to keep discussing it.
+A terminal can't clipboard-paste an image, so the entry is a file ref (`@screenshot.png`).
+**Charter fit.** Gemini-only is an honest provider asymmetry surfaced to the user (the warning), not hidden;
+the engine stays a pass-through (`images` is just another optional `ProviderRequest` field).
+**Phase.** Built. `src/images.ts`; `ImageInput` on `ProviderRequest`/`LoopOptions`; `gemini.ts` attaches;
+`app.ts` `prepareImages` + threading; `/help` notes `@img.png`. Tests: `tests/images.test.ts` + a `gemini.ts`
+attach test. Manuals: `providers.md`, `tui.md`.
+
+---
+
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
 - **Interrupt:** `ESC` aborts the current streaming turn (via the provider `AbortSignal`);
   `Ctrl+C` exits the app. The TUI shows a **working indicator** (a static `●` bullet + `working`) while a

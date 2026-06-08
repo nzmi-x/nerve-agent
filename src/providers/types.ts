@@ -56,6 +56,15 @@ export interface ProviderRequest {
   temperature?: number;
   /** Thinking effort (D52). Provider-mapped: DeepSeek `reasoning_effort`/disable, Gemini `thinkingLevel`. */
   effort?: Effort;
+  /** Inline image input (D53) — **request-scoped, never persisted**. Gemini attaches these as `inlineData`
+   *  on the current user turn; DeepSeek (text-only) ignores them. */
+  images?: ImageInput[];
+}
+
+/** A base64 inline image for a request (D53). `data` is base64-encoded bytes; `mimeType` e.g. `image/png`. */
+export interface ImageInput {
+  mimeType: string;
+  data: string;
 }
 
 /** A provider speaks its API raw (fetch + SSE) and emits StreamEvents. Nothing else is shared. */
