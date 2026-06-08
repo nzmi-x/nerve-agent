@@ -1,13 +1,15 @@
-// The right-hand dashboard (D29): seven bordered panels — session · todos · skills · lsp · tools ·
-// subagents · files — mirroring live session state. app.ts owns the state and gathers it into a
+// The right-hand dashboard (D29): bordered panels — cwd · session · todos · skills · lsp · tools ·
+// subagents · (files | git) — mirroring live session state. app.ts owns the state and gathers it into a
 // `SidebarState` per render; this module owns the panels, the row pools, and the fill/height logic.
-// Each panel's title takes its border colour (OpenTUI has no separate title colour), so they get
-// distinct accents. Hidden (width 0) below SIDEBAR_MIN cols or when toggled off — methods no-op then.
+// Each panel's title takes its border colour (OpenTUI has no separate title colour), so they get distinct
+// accents. The bottom flex-grow slot holds EITHER files or git (D49) — `bottomView` toggles it (Ctrl+G).
+// Hidden (width 0) below SIDEBAR_MIN cols or when toggled off — methods no-op then.
 import { BoxRenderable, TextRenderable, createCliRenderer, t, fg, bg } from "@opentui/core";
 import { relative } from "node:path";
 import { formatCost, formatContext } from "../usage.ts";
 import { formatBalance, type Balance } from "../balance.ts";
-import { trunc } from "./format.ts";
+import { trunc, shortenPath } from "./format.ts";
+import type { GitBranch, GitCommit } from "../git.ts";
 import type { Theme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Todo } from "../tools/types.ts";
@@ -34,6 +36,13 @@ export interface SidebarState {
   files: string[];
   sessionEdited: ReadonlySet<string>;
   cwd: string;
+  branch?: string; // D49: current git branch (null/absent off a repo)
+  gitDirty?: number; // changed-file count
+  ahead?: number;
+  behind?: number;
+  gitBranches?: GitBranch[]; // for the git view (Ctrl+G)
+  gitLog?: GitCommit[];
+  bottomView: "files" | "git"; // which panel fills the bottom slot (D49)
   todos: Todo[];
   termHeight: number;
 }
@@ -62,20 +71,27 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
     return rows;
   };
+  const cwdPanel = mkPanel("cwdPanel", " cwd ", () => theme.CYAN);
   const sessionPanel = mkPanel("sessionPanel", " session ", () => theme.CYAN);
   const todosPanel = mkPanel("todosPanel", " todos ", () => theme.ACCENT); // 1-line summary (full list is Ctrl+T)
   const skillsPanel = mkPanel("skillsPanel", " skills ", () => theme.MAGENTA);
   const lspPanel = mkPanel("lspPanel", " lsp ", () => theme.ACCENT);
   const toolsPanel = mkPanel("toolsPanel", " tools ", () => theme.GREEN);
   const subagentsPanel = mkPanel("subagentsPanel", " subagents ", () => theme.YELLOW);
-  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE, true);
-  for (const p of [sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel]) box.add(p);
+  // Bottom flex-grow slot: files OR git (D49). Both non-grow; render() sets the active one's flexGrow, the
+  // other collapses to height 0.
+  const filesPanel = mkPanel("filesPanel", " files ", () => theme.ORANGE);
+  const gitPanel = mkPanel("gitPanel", " git ", () => theme.GREEN);
+  for (const p of [cwdPanel, sessionPanel, todosPanel, skillsPanel, lspPanel, toolsPanel, subagentsPanel, filesPanel, gitPanel]) box.add(p);
+  const CWD_ROWS = 2; // path + branch
   const SESSION_ROWS = 6; // model, mode, cost, ctx, bal, streaming
   const SKILL_ROWS = 6;
   const LSP_ROWS = 5;
   const TOOL_ROWS = 6;
   const SUB_ROWS = 6;
   const FILE_ROWS = 40;
+  const GIT_ROWS = 40;
+  const cwdRows = mkRows(cwdPanel, CWD_ROWS, "cwd", 1);
   const sessionRows = mkRows(sessionPanel, SESSION_ROWS, "sess", 1);
   const todoSumRows = mkRows(todosPanel, 1, "todosum", 1); // single summary row
   const skillRows = mkRows(skillsPanel, SKILL_ROWS, "skill", 0);
@@ -83,6 +99,11 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
   const toolRows = mkRows(toolsPanel, TOOL_ROWS, "tool", 0);
   const subagentRows = mkRows(subagentsPanel, SUB_ROWS, "sub", 0);
   const fileRows = mkRows(filesPanel, FILE_ROWS, "file", 0);
+  const gitRows = mkRows(gitPanel, GIT_ROWS, "git", 0);
+
+  /** The ahead/behind suffix (` ↑a ↓b`), only the nonzero parts — a chunk for `t`-interpolation. */
+  const aheadBehind = (ahead?: number, behind?: number) =>
+    ahead || behind ? fg(theme.MUTE)(`${ahead ? ` ↑${ahead}` : ""}${behind ? ` ↓${behind}` : ""}`) : "";
 
   // The 1-line todos panel (the full list is app.ts's Ctrl+T panel) — done/total + the current focus.
   function renderTodoSummary(todos: Todo[]): void {
@@ -101,6 +122,18 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
 
   function render(s: SidebarState): void {
     if (box.width === 0) return; // hidden — skip the work
+    // cwd panel (D49): working dir (starship-style) + git branch / dirty / ahead-behind, always on top.
+    cwdRows[0]!.content = t`${fg(theme.FG)(trunc(shortenPath(s.cwd), W))}`;
+    if (s.branch) {
+      const dirty = s.gitDirty ? fg(theme.YELLOW)(`●${s.gitDirty}`) : fg(theme.GREEN)("✓");
+      cwdRows[1]!.content = t`${fg(theme.MAGENTA)("⎇")} ${fg(theme.FG)(trunc(s.branch, W - 10))} ${dirty}${aheadBehind(s.ahead, s.behind)}`;
+      cwdRows[1]!.height = 1;
+    } else {
+      cwdRows[1]!.content = "";
+      cwdRows[1]!.height = 0;
+    }
+    cwdPanel.height = (s.branch ? 2 : 1) + 2;
+
     // session panel: model · mode · cost · ctx · bal (the title now lives in the transcript box border).
     sessionRows[0]!.content = t`${fg(theme.MUTE)("model ")}${fg(theme.FG)(trunc(s.model, W - 6))}`;
     sessionRows[1]!.content = s.mode === "edit" ? t`${fg(theme.MUTE)("mode  ")}${bg(theme.GREEN)(fg(theme.DARKFG)(" EDIT "))}` : t`${fg(theme.MUTE)("mode  ")}${bg(theme.YELLOW)(fg(theme.DARKFG)(" PLAN "))}`;
@@ -183,9 +216,25 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
     subagentsPanel.height = Math.max(1, subWin.length) + 2;
 
-    // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
+    // bottom flex-grow slot (D49): files OR git, by `bottomView`. The inactive panel collapses to height 0.
+    const git = s.bottomView === "git";
+    filesPanel.flexGrow = git ? 0 : 1;
+    gitPanel.flexGrow = git ? 1 : 0;
+    if (git) {
+      filesPanel.height = 0;
+      for (const r of fileRows) r.height = 0;
+      renderGit(s);
+    } else {
+      gitPanel.height = 0;
+      for (const r of gitRows) r.height = 0;
+      renderFiles(s);
+    }
+  }
+
+  // files panel: this session's touched files, most-recent first; ✎ = written/edited, · = read-only.
+  function renderFiles(s: SidebarState): void {
     const files = s.files;
-    const usedAbove = sessionPanel.height + todosPanel.height + (skills.length + 2) + lspPanel.height + (Math.max(1, toolWin.length) + 2) + (Math.max(1, subWin.length) + 2) + 2;
+    const usedAbove = cwdPanel.height + sessionPanel.height + todosPanel.height + skillsPanel.height + lspPanel.height + toolsPanel.height + subagentsPanel.height + 2;
     const cap = Math.max(1, Math.min(FILE_ROWS, s.termHeight - usedAbove));
     for (let i = 0; i < fileRows.length; i++) {
       const tr = fileRows[i]!;
@@ -204,6 +253,28 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
   }
 
+  // git panel (D49): branch/status header · local branches · recent commits (hash + subject).
+  function renderGit(s: SidebarState): void {
+    const rows: Content[] = [];
+    const dirty = s.gitDirty ? fg(theme.YELLOW)(`●${s.gitDirty}`) : fg(theme.GREEN)("✓ clean");
+    rows.push(t`${fg(theme.MAGENTA)("⎇")} ${fg(theme.FG)(trunc(s.branch ?? "—", W - 12))} ${dirty}${aheadBehind(s.ahead, s.behind)}`);
+    const branches = (s.gitBranches ?? []).slice(0, 5);
+    if (branches.length) {
+      rows.push(t`${fg(theme.DIM)("branches")}`);
+      for (const b of branches) rows.push(b.current ? t`${fg(theme.GREEN)("●")} ${fg(theme.FG)(trunc(b.name, W - 2))}` : t`${fg(theme.DIM)("○")} ${fg(theme.MUTE)(trunc(b.name, W - 2))}`);
+    }
+    const log = s.gitLog ?? [];
+    if (log.length) {
+      rows.push(t`${fg(theme.DIM)("commits")}`);
+      for (const c of log) rows.push(t`${fg(theme.YELLOW)(c.hash)} ${fg(theme.FG)(trunc(c.subject, Math.max(4, W - c.hash.length - 1)))}`);
+    }
+    if (!s.branch && !log.length) rows.push(t`${fg(theme.DIM)("(not a git repo)")}`);
+    for (let i = 0; i < gitRows.length; i++) {
+      gitRows[i]!.content = i < rows.length ? rows[i]! : "";
+      gitRows[i]!.height = i < rows.length ? 1 : 0;
+    }
+  }
+
   return {
     box,
     get visible() {
@@ -218,6 +289,7 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       box.width = visible ? SIDEBAR_W : 0;
     },
     retheme() {
+      cwdPanel.borderColor = theme.CYAN;
       sessionPanel.borderColor = theme.CYAN;
       todosPanel.borderColor = theme.ACCENT;
       skillsPanel.borderColor = theme.MAGENTA;
@@ -225,6 +297,7 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
       toolsPanel.borderColor = theme.GREEN;
       subagentsPanel.borderColor = theme.YELLOW;
       filesPanel.borderColor = theme.ORANGE;
+      gitPanel.borderColor = theme.GREEN;
     },
   };
 }

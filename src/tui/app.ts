@@ -30,6 +30,8 @@ import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { nestedMemory } from "../context.ts";
+import { lineDiff, diffStat } from "../diff.ts";
+import { gitBranch, gitStatus, gitBranches, gitLog, type GitStatus, type GitBranch, type GitCommit } from "../git.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel } from "./format.ts";
@@ -109,6 +111,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let lineId = 0;
   let echoGuard: string | null = null;
   let prevInput = ""; // last input text — diffed in onContentChange to make paste tokens atomic on delete (#3)
+  let bottomView: "files" | "git" = "files"; // D49: which panel fills the bottom sidebar slot — Ctrl+G toggles
+  let gitData: { branch: string | null; status: GitStatus | null; branches: GitBranch[]; log: GitCommit[] } = { branch: null, status: null, branches: [], log: [] };
   // Long/multi-line pastes collapse to a "[Pasted N lines #id]" token at the cursor (so they don't flood
   // the box). Each paste is stashed under a unique id and substituted back **by id** on send. Deleting any
   // character of a token removes the WHOLE token (atomic — `dropBrokenPaste` in onContentChange), so it's
@@ -294,9 +298,25 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       files: [...langTouched].reverse(),
       sessionEdited,
       cwd,
+      branch: gitData.branch ?? undefined,
+      gitDirty: gitData.status?.dirty,
+      ahead: gitData.status?.ahead,
+      behind: gitData.status?.behind,
+      gitBranches: gitData.branches,
+      gitLog: gitData.log,
+      bottomView,
       todos: currentTodos,
       termHeight: renderer.height,
     });
+  }
+  // D49: refresh cached git data — branch + status always (cheap), branches/log only when the git view is
+  // shown (subprocesses). Called at startup, after each turn, and on Ctrl+G; then repaints the sidebar.
+  async function refreshGit(): Promise<void> {
+    const branch = gitBranch(cwd);
+    const status = await gitStatus(cwd);
+    const [branches, log] = bottomView === "git" ? await Promise.all([gitBranches(cwd), gitLog(cwd, 14)]) : [gitData.branches, gitData.log];
+    gitData = { branch, status, branches, log };
+    renderSidebar();
   }
   // Subagent lifecycle (D6) → the subagents panel. Pushed on start, flipped on end.
   const onSubagent = (ev: SubagentEvent): void => {
@@ -723,6 +743,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     cmd("/compact", "summarize old turns to reclaim context");
     cmd("/clear", "clear the transcript (keep the session)");
     cmd("/reload", "hot-reload tools + interceptors");
+    cmd("/git", "swap the sidebar's files ↔ git view (Ctrl+G)");
     cmd("/drop", "delete this session, start a fresh one");
     cmd("/balance", "refresh the provider balance");
     cmd("/quit", "exit nerve");
@@ -740,6 +761,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     key("Ctrl+↑ / Ctrl+↓", "scroll the transcript (Alt+↑/↓ too)");
     key("Ctrl+B", "toggle sidebar");
     key("Ctrl+T", "toggle the todo list");
+    key("Ctrl+G", "swap the sidebar's files ↔ git view");
     key("Ctrl+R", "reload");
     key("ESC", "stop the turn / close a popup");
     key("Ctrl+C", "quit");
@@ -774,6 +796,10 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         return void drop();
       case "mode":
         toggleMode(); // just flip PLAN ↔ EDIT — no need to name the target (badge is the indicator)
+        return;
+      case "git":
+        bottomView = bottomView === "git" ? "files" : "git"; // D49: toggle the git view (same as Ctrl+G)
+        void refreshGit();
         return;
       case "models":
         openPicker({
@@ -858,6 +884,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     busy = false;
     setStatus();
     drainRetheme(); // apply a theme change that arrived mid-turn (D30)
+    void refreshGit(); // D49: reflect any commit/branch/file changes the turn made
     input.focus();
   }
 
@@ -931,6 +958,20 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       if (proseGap) gapLine = addText(() => "");
       proseGap = false;
     };
+    // D49: render an inline +/- diff of an agent edit (like Claude Code) — display-only; the model still gets
+    // the tool's text result, and onToolResult skips the generic line for a successful edit/write.
+    const renderEditDiff = (path: string, oldText: string, newText: string): void => {
+      const rp = path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
+      const { added, removed } = diffStat(oldText, newText);
+      addText(() => t`${fg(theme.GREEN)("⎿")} ${fg(theme.CYAN)("✎")} ${fg(theme.MUTE)(rp)}  ${fg(theme.DIM)(added || removed ? `+${added} -${removed}` : "no change")}`);
+      const d = lineDiff(oldText, newText);
+      if (d) {
+        const md = addMarkdown();
+        md.content = `\`\`\`diff\n${d}\n\`\`\``;
+        md.streaming = false;
+      }
+      proseGap = true;
+    };
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.
     const packs = activePacks(langTouched);
     const key = packs.map((p) => p.id).join(",");
@@ -948,7 +989,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
         session,
         model: active.id,
         mode,
-        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal, onSubagent, onCost: (usd) => (meter.addCost(usd), setStatus()) },
+        ctx: { cwd, ask, lsp: opts.lsp, touched: langTouched, edited, setTodos, signal: ac.signal, onSubagent, onFileChange: renderEditDiff, onCost: (usd) => (meter.addCost(usd), setStatus()) },
         interceptors: [
           ic.secretRedaction(),
           ic.reasoningRouter((d) => {
@@ -997,6 +1038,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
           if (tc) tc.status = ok ? "ok" : "err"; // ✓ / ✗
           renderSidebar();
           if (name === "todo") return; // shown in the pinned todo panel, not as a transcript line
+          if ((name === "edit" || name === "write") && ok) return; // D49: the inline diff (onFileChange) is its visual
           // `⎿ name  <arg>` — name + glyph colored by outcome (cyan/green ok, red error); on failure the
           // error message tails it (the arg alone isn't enough to know what went wrong).
           const arg = argSummaries.get(id) ?? "";
@@ -1094,6 +1136,13 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       key.preventDefault(); // else the Textarea runs readline Ctrl+T (transpose-chars)
       key.stopPropagation();
       toggleTodos(); // show/hide the full todo list (hidden by default; sidebar shows the 1-line summary)
+      return;
+    }
+    if (key.ctrl && key.name === "g") {
+      key.preventDefault(); // else the Textarea runs readline Ctrl+G (abort)
+      key.stopPropagation();
+      bottomView = bottomView === "git" ? "files" : "git"; // D49: swap the bottom sidebar slot files ↔ git
+      void refreshGit(); // fetch branches/log when switching to git; repaints the sidebar
       return;
     }
     // Enter-family: we OWN it (preventDefault), so the Textarea doesn't *also* newline/submit (double-act).
@@ -1215,6 +1264,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   applySidebar(); // size sidebar + status bar to the terminal width, and render their content (calls setStatus)
   watchSystemTheme(); // D30: live-follow GNOME light/dark
   void refreshBalance();
+  void refreshGit(); // D49: populate the cwd panel's branch + status on launch
 
   // Animate the working indicator (~11 fps) so the user can always see the agent is alive. Cheap: while
   // busy it advances the spinner on just the visible surface (session panel if the sidebar's up, else the

@@ -1196,6 +1196,35 @@ should see).
 **Phase.** Built. `loadProjectMemory` + `nestedMemory` in `src/context.ts`; per-turn wiring in `index.ts` +
 `src/tui/app.ts`; tests in `tests/context.test.ts`. Delivers the user's `**/CLAUDE.md` `**/AGENTS.md` request.
 
+## D49 — TUI: location + git view in the sidebar, and inline agent-edit diffs
+**Decision.** Three read-only, display-only additions:
+1. **Location panel** (top of the sidebar): the working dir (starship-style `shortenPath`, `~` / `…/`) + git
+   `⎇ branch · ● dirty · ↑ahead ↓behind`. `gitBranch` reads `.git/HEAD` directly (no subprocess).
+2. **Git view** (`Ctrl+G` / `/git`): the sidebar's bottom flex-grow slot **swaps `files` ↔ `git`** — a
+   branch/status header, local branches (current marked), and recent commits (hash + subject). A **toggle**
+   (files stays a keystroke away), not a permanent replace, and no overlay. Data via `gitStatus`/`gitBranches`/
+   `gitLog` (`git status -sb` / `branch` / `log`), cached in `app.ts` and refreshed at startup, after each
+   turn, and on Ctrl+G (branches/log only while the view is open — they're subprocesses).
+3. **Inline agent-edit diffs** (like Claude Code, **not** `git diff`): `edit`/`write` already hold old + new,
+   so they call a new `ctx.onFileChange(path, old, new)` display hook; the TUI renders `lineDiff(old, new)` (a
+   tiny zero-dep LCS line differ, `src/diff.ts`) as a syntax-highlighted ```diff block + a `✎ path +a -b`
+   line, replacing the verbose "Applied N edits" line **in the UI only**. The model's tool result (anchors +
+   diagnostics) is unchanged; the engine/loop is untouched (`onFileChange` is a ctx hook like `setTodos`/D6).
+**Why.** nerve surfaced *where you are*, the project's *git state*, and *what the agent changed* nowhere — the
+last especially (only a text "Applied N edits"). The user wanted a starship-like dir+branch, a glanceable git
+view (their idea: reuse the files slot), and to *see* the agent's edits. `git diff` is the wrong tool for the
+edit visual — it shows all uncommitted changes, needs a repo, and bloats the model's context; tool-level
+old→new diffs are exactly the change, work anywhere, and stay out of the model's context.
+**Read-only + safe.** Git is status/branch/log + a `.git/HEAD` read (the `SAFE_GIT` set, D4/dispatch); no
+mutation. Off a repo the panels degrade quietly.
+**Rejected.** `git diff` for the change visual (per the user — wrong scope); a persistent thin git *graph*
+panel (eats sidebar width; ugly in ~30 cols) and a separate diff overlay (the files-slot swap is cleaner) —
+both considered, the swap won; sending the diff to the model in the tool result (display-only keeps context lean).
+**Phase.** Built. `src/git.ts` + `src/diff.ts` + `shortenPath` (`src/tui/format.ts`); `onFileChange` on
+`ToolContext` (`edit`/`write` emit it); sidebar cwd + git panels + `bottomView`; `app.ts` Ctrl+G/`/git`/
+`renderEditDiff`/`refreshGit`. Tests: `tests/diff.test.ts`, `tests/git.test.ts`, `tests/format.test.ts`. TUI
+interaction is typecheck- + load-verified (no TTY in CI). Manual at `docs/manual/git.md`.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

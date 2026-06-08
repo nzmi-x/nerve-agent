@@ -17,9 +17,12 @@ export const write: Tool = {
     if (typeof args.path !== "string") return "Error: 'path' must be a string";
     if (typeof args.content !== "string") return "Error: 'content' must be a string";
     const abs = resolvePath(ctx.cwd, args.path);
+    const prev = Bun.file(abs);
+    const oldText = (await prev.exists()) ? (await prev.text()).replaceAll("\r\n", "\n") : ""; // for the D49 diff
     ctx.touched?.add(abs);
     ctx.edited?.add(abs); // post-edit hooks run on this at turn end (D24)
     await Bun.write(abs, args.content); // creates parent dirs
+    ctx.onFileChange?.(abs, oldText, args.content); // D49: surface a diff of the change (display-only)
     const n = args.content === "" ? 0 : args.content.replace(/\n$/, "").split("\n").length;
     const head = `Wrote ${args.path} (${n} line${n === 1 ? "" : "s"})`;
     return ctx.lsp ? head + (await ctx.lsp.diagnostics(abs, args.content)) : head; // D10: did I break it?

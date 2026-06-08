@@ -22,7 +22,9 @@ no daemon, no RPC. The registry exposes them to the providers and to the dispatc
   bloat context — the tail is never lost (vs. a truncating cap). The old per-tool output caps are gone.
 - `read` emits `hashline.encode` (`LINE#HASH:content`); `edit` drives `hashline.applyEdits` and, on a
   stale anchor, returns the rejection + fresh anchors; on success (small files) it echoes updated
-  anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`).
+  anchors so the next edit needs no re-read. `write` creates parent dirs (`Bun.write`). On success both fire
+  `ctx.onFileChange(path, old, new)` → the TUI shows an inline +/- diff of the change ([D49](../DECISIONS.md),
+  `src/diff.ts`); **display-only**, the model's text result is unaffected.
 - `bash` runs `$SHELL -c` (zsh on this setup, falls back to `zsh`) via `Bun.spawn` (combined
   stdout+stderr, 2-min kill timeout). The shell is verified at startup (`preflight`).
   `ls`/`glob`/`grep` are readonly search — `Bun.Glob` for matching, pure-JS line scan for grep

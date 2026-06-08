@@ -20,3 +20,14 @@ export function rel(ms: number): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
+
+/** Starship-style path for the location panel (D49): `$HOME → "~"`, and when deeper than `keep` segments,
+ *  keep only the last `keep` with a leading `…/`. */
+export function shortenPath(cwd: string, home = process.env.HOME ?? "", keep = 3): string {
+  let p = cwd.replace(/\/+$/, "") || "/";
+  if (home && (p === home || p.startsWith(`${home}/`))) p = `~${p.slice(home.length)}`; // → "~" or "~/sub"
+  const abs = p.startsWith("/");
+  const segs = p.split("/").filter(Boolean);
+  if (segs.length <= keep) return (abs ? "/" : "") + segs.join("/") || "/";
+  return `…/${segs.slice(-keep).join("/")}`;
+}

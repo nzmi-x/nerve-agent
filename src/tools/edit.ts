@@ -46,6 +46,7 @@ export const edit: Tool = {
     if (!result.ok) return `Edit rejected — ${result.error}\nFresh anchors:\n${result.anchors}`;
 
     await Bun.write(abs, result.content);
+    ctx.onFileChange?.(abs, content, result.content); // D49: surface a diff of the change (display-only)
     ctx.touched?.add(abs);
     ctx.edited?.add(abs); // post-edit hooks run on this at turn end (D24)
     const n = result.content === "" ? 0 : result.content.replace(/\n$/, "").split("\n").length;

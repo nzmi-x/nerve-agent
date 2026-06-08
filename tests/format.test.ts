@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { firstLine, trunc, rel } from "../src/tui/format.ts";
+import { firstLine, trunc, rel, shortenPath } from "../src/tui/format.ts";
 
 test("firstLine: takes line one and clips at 120 cols", () => {
   expect(firstLine("hello\nworld")).toBe("hello");
@@ -24,4 +24,11 @@ test("rel: buckets into s/m/h/d and never goes negative", () => {
   expect(rel(now - 2 * 3_600_000)).toBe("2h ago");
   expect(rel(now - 3 * 86_400_000)).toBe("3d ago");
   expect(rel(now + 10_000)).toBe("0s ago"); // future clamps to 0
+});
+
+test("shortenPath: home → ~, deep paths keep the last 3 with a leading …/", () => {
+  expect(shortenPath("/home/naz/Documents/nerve", "/home/naz")).toBe("~/Documents/nerve");
+  expect(shortenPath("/home/naz", "/home/naz")).toBe("~");
+  expect(shortenPath("/usr/local/share/foo/bar", "")).toBe("…/share/foo/bar");
+  expect(shortenPath("/a/b", "")).toBe("/a/b");
 });

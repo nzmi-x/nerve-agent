@@ -27,8 +27,10 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   **or** ask picker, per-row bg highlight) · a **bordered input** `Box` (`❯` prompt + `Input`) · a styled
   status bar.
 - **Sidebar** ([D29](../DECISIONS.md)): stacked bordered panels, each with a **distinct accent border**
-  (the title rides on the border colour — session=cyan, todos=accent, skills=magenta, lsp=accent,
-  tools=green, subagents=yellow, files=orange; the transcript box is accent-blue). **session** (model ·
+  (the title rides on the border colour — cwd=cyan, session=cyan, todos=accent, skills=magenta, lsp=accent,
+  tools=green, subagents=yellow, files=orange, git=green; the transcript box is accent-blue). A **cwd** panel
+  ([D49](../DECISIONS.md)) tops the stack — the working dir (starship-style `shortenPath`) + `⎇ branch · ● dirty · ↑↓`.
+  **session** (model ·
   mode badge · cost · ctx · balance — the *session title* lives in the transcript box header, not here),
   **todos** (a **1-line summary** of the task list — `▸ done/total <current focus>`, the always-visible
   counterpart to the Ctrl+T full panel), **lsp** (spawned
@@ -36,8 +38,9 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   hooks** (ruff/prettier/…) as they run, **skills** (the skills *loaded into context now* —
   always-on defaults + active language packs via `activeSkillNames`), **tools** (the main agent's tool calls
   this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
-  session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and **files** (touched files,
-  most-recent first; `✎` written, `·` read-only — `flexGrow` fills the rest). All use the same
+  session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and a bottom flex-grow slot that
+  **`Ctrl+G` swaps between files ↔ git** ([D49](../DECISIONS.md)): **files** (touched files, most-recent
+  first; `✎` written, `·` read-only) or **git** (branch/status header, local branches, recent commits). All use the same
   fixed-pool-of-rows pattern as the todo panel; each compact panel keeps a **`(none …)` placeholder** when
   empty (so it never collapses to a thin border), and the files pool is height-capped (subtracting the other
   panels) so it never overflows. **`Ctrl+B`** toggles the sidebar; it **auto-hides below 100 cols** (guarded
@@ -111,7 +114,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   **not** toggle the mode — only **Shift+Tab** / `/mode` do, to avoid an accidental mode flip) · ↑/↓
   navigate · **Ctrl+↑/↓ (or Alt+↑/↓) scroll the transcript** (`key.preventDefault` so the key doesn't also
   hit the input; the ScrollBox drops sticky-bottom on manual scroll) · **Ctrl+B sidebar** · **Ctrl+T todo
-  list** · **Ctrl+R reload** · ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.) Scroll keys are
+  list** · **Ctrl+G git/files** · **Ctrl+R reload** · ESC stop · Ctrl+C quit. (`/exit` aliases `/quit`.) Scroll keys are
   deliberately ones ghostty **passes to the app** and the input's Textarea doesn't bind — **PgUp/PgDn were
   dropped** (terminals like ghostty grab them for their own scrollback, so they never arrived); `Shift+↑/↓`
   is avoided too (the input uses it for text-select).

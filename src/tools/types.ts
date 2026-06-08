@@ -50,6 +50,9 @@ export interface ToolContext {
   onSubagent?: (ev: SubagentEvent) => void;
   /** Charge cost incurred off the main thread (a subagent's token spend) to the session meter (D6). */
   onCost?: (usd: number) => void;
+  /** A file was created/changed by `write`/`edit` (D49): absolute path + old & new text, so a surface can
+   *  render a diff of what the agent changed. **Display-only** — the tool's text result is unaffected. */
+  onFileChange?: (path: string, oldText: string, newText: string) => void;
 }
 
 export interface Tool {
