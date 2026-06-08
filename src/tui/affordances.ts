@@ -163,6 +163,22 @@ export function expandPastes(text: string, stash: Map<number, string>): string {
   return out;
 }
 
+/** Atomic paste tokens (#3): if the **single-character** deletion that turned `prev`→`cur` fell inside a
+ *  `[Pasted N lines #id]` token, return the text with that WHOLE token removed + its id; else `null`. So one
+ *  backspace inside a collapsed paste drops the entire token instead of leaving a broken `[Pasted …]`. */
+export function dropBrokenPaste(prev: string, cur: string): { text: string; id: number } | null {
+  if (prev.length - cur.length !== 1) return null; // only a single-character deletion
+  let d = 0;
+  while (d < cur.length && prev[d] === cur[d]) d++; // first differing index = the deleted position
+  for (const m of prev.matchAll(/\[Pasted \d+ lines? #(\d+)\]/g)) {
+    const start = m.index ?? 0;
+    if (d >= start && d < start + m[0].length) {
+      return { text: prev.slice(0, start) + prev.slice(start + m[0].length), id: Number(m[1]) };
+    }
+  }
+  return null;
+}
+
 function parseFrontmatter(md: string): { name?: string; description?: string } {
   const m = /^---\n([\s\S]*?)\n---/.exec(md);
   if (!m) return {};

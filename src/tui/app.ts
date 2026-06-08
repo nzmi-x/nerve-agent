@@ -25,7 +25,7 @@ import { reloadTools, toolSpecs } from "../tools/registry.ts";
 import { providerFor, fallbacksFor, type ModelEntry } from "../config.ts";
 import { UsageMeter, formatCost, formatContext, formatModelStatus } from "../usage.ts";
 import { fetchBalance, formatBalance, type Balance } from "../balance.ts";
-import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
+import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSuggestion, loadSkillBody, pasteToken, expandPastes, dropBrokenPaste, toolArgSummary, type CommandInfo, type Skill } from "./affordances.ts";
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
@@ -108,9 +108,11 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let turnAbort: AbortController | null = null;
   let lineId = 0;
   let echoGuard: string | null = null;
+  let prevInput = ""; // last input text — diffed in onContentChange to make paste tokens atomic on delete (#3)
   // Long/multi-line pastes collapse to a "[Pasted N lines #id]" token at the cursor (so they don't flood
-  // the box). Each paste is stashed under a unique id and substituted back **by id** on send — so deleting
-  // (or editing) a token just drops that paste, with no effect on the others (#1 cursor, #3 delete/undo).
+  // the box). Each paste is stashed under a unique id and substituted back **by id** on send. Deleting any
+  // character of a token removes the WHOLE token (atomic — `dropBrokenPaste` in onContentChange), so it's
+  // never left half-edited; tokens are independent (#1 cursor, #3 delete/undo).
   const pastes = new Map<number, string>();
   let pasteSeq = 0;
   let pendingRetheme = false; // a system light/dark change arrived mid-turn — apply it once idle (D30)
@@ -180,12 +182,27 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     // keypress handler, which definitely fires — so sending never depends on the Textarea's own binding.
     keyBindings: defaultTextareaKeyBindings.filter((b) => b.action !== "newline" || b.ctrl || b.shift || b.meta),
     onContentChange: () => {
-      if (echoGuard !== null && input.plainText === echoGuard) {
+      const cur = input.plainText;
+      if (echoGuard !== null && cur === echoGuard) {
         echoGuard = null;
+        prevInput = cur;
         return;
       }
       echoGuard = null;
-      void updateSuggestions(input.plainText);
+      // #3: one backspace inside a "[Pasted N lines #id]" token removes the WHOLE token (atomic), not a char.
+      if (pastes.size) {
+        const dropped = dropBrokenPaste(prevInput, cur);
+        if (dropped) {
+          pastes.delete(dropped.id);
+          prevInput = dropped.text;
+          echoGuard = dropped.text; // guard the echo from the setText below
+          input.setText(dropped.text);
+          void updateSuggestions(dropped.text);
+          return;
+        }
+      }
+      prevInput = cur;
+      void updateSuggestions(cur);
     },
   });
   inputBox.add(prompt);

@@ -78,10 +78,12 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   popup updates on every keystroke (`parseAffordance` → `at`/`slash` suggestions).
 - **Paste shortening:** a long (>200 char) or multi-line paste collapses to a `[Pasted N lines #id]`
   token **at the cursor** (so the caret moves past it and you keep typing), with the full text stashed
-  under that id. On send, `expandPastes` substitutes each surviving token back **by id** — so deleting
-  or editing a token simply **drops that paste** (no effect on the others, undo-safe), and tokens needn't
-  stay in paste order. Logic in `affordances.ts` (`pasteToken`/`expandPastes`, tested); the `paste` event
-  handler in `app.ts` does the insert.
+  under that id. On send, `expandPastes` substitutes each surviving token back **by id** — so dropping a
+  token simply drops that paste (no effect on the others, undo-safe), and tokens needn't stay in paste order.
+  A token is **atomic on delete**: backspacing *any* character of it removes the whole token, never a broken
+  `[Pasted …]` (`dropBrokenPaste`, diffed against the prior input in `onContentChange`). Logic in
+  `affordances.ts` (`pasteToken`/`expandPastes`/`dropBrokenPaste`, tested); the `paste` event handler in
+  `app.ts` does the insert.
 - **Commands:** `/help /models /mode /clear /compact /reload /sessions /resume /drop /balance /quit`
   — **none take parameters**; what used to need an argument is now an **interactive picker** (`/help` is
   color-coded). System lines are consistently iconned: `·` info · `✦` ok · `⚠` warn · `✗` error.

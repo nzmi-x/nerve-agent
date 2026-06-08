@@ -13,6 +13,7 @@ import {
   pasteToken,
   toolArgSummary,
   expandPastes,
+  dropBrokenPaste,
 } from "../src/tui/affordances.ts";
 
 // --- parseAffordance --------------------------------------------------------
@@ -117,4 +118,30 @@ test("loadSkillBody: strips frontmatter, returns the skill instructions (D12)", 
   const body = await loadSkillBody(opentui.path);
   expect(body.length).toBeGreaterThan(0);
   expect(body.startsWith("---")).toBe(false); // YAML frontmatter removed
+});
+
+test("dropBrokenPaste: a single-char deletion inside a token drops the whole token (#3)", () => {
+  const prev = "hi [Pasted 5 lines #2] there";
+  const at = prev.indexOf("Pasted") + 1; // a position inside the token
+  const cur = prev.slice(0, at) + prev.slice(at + 1); // delete one char inside the token
+  const res = dropBrokenPaste(prev, cur);
+  expect(res).not.toBeNull();
+  expect(res!.id).toBe(2);
+  expect(res!.text).toBe("hi  there"); // token gone (the two surrounding spaces remain)
+});
+
+test("dropBrokenPaste: deleting the token's trailing ] (token at end) drops it", () => {
+  const prev = "note [Pasted 12 lines #7]";
+  const res = dropBrokenPaste(prev, prev.slice(0, -1)); // backspace the final ']'
+  expect(res?.id).toBe(7);
+  expect(res?.text).toBe("note ");
+});
+
+test("dropBrokenPaste: a deletion outside any token is ignored", () => {
+  const prev = "hello [Pasted 5 lines #2] world";
+  expect(dropBrokenPaste(prev, "hell [Pasted 5 lines #2] world")).toBeNull(); // deleted the 'o' in 'hello'
+});
+
+test("dropBrokenPaste: a multi-char change (not one backspace) is ignored", () => {
+  expect(dropBrokenPaste("x [Pasted 5 lines #2] y", "x  y")).toBeNull(); // length delta ≠ 1
 });
