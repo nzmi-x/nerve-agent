@@ -57,7 +57,9 @@ Each tool's schema is supplied separately — these are the non-obvious workflow
   a reason to abandon an unfinished task.
 - **Read before you edit.** Prefer small, surgical hash-anchored edits over rewriting whole files.
 - Match the surrounding code's style; keep changes minimal.
-- Run `bun run typecheck` and `bun run test` when you've changed code.
+- **Verify after editing code.** Run `bun run typecheck` + the relevant tests, and read the LSP diagnostics
+  appended to your `read`/`edit`/`write` results — fix what they surface *before* you call the task done. The
+  compiler + tests are the verification; don't guess at correctness when you can check it.
 - **Editing nerve itself (self-hack).** You can adapt your own tools/prompts/docs while launched in any
   project: address the source with the `self:` prefix. Read `manual("self")` for the loop, and the
   subsystem's `manual(<x>)` page first; update that page in the same change. Self-edits need EDIT mode;

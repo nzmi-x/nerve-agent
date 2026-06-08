@@ -1113,6 +1113,18 @@ over a ceiling).
 tail-append in `src/loop.ts`; wired in `src/tui/app.ts`; framing in `prompts/system.md`. Tests in
 `tests/usage.test.ts` + `tests/loop.test.ts`.
 
+## D44 — Verification by prompt, not an LLM judge (idea 9)
+**Decision.** Sharpen `prompts/system.md` to make the model **verify after editing code** — run `typecheck` +
+relevant tests and read the LSP diagnostics already appended to its edits — rather than add an LLM-judge
+verification pass. No new machinery.
+**Why.** For a coding agent the verification oracle is **deterministic and already wired**: LSP diagnostics on
+every `read`/`edit`/`write` (D10), post-edit hooks (D24), and `bun run typecheck`/`test` one bash call away. An
+LLM-judge re-derives — more weakly and at cost — what the compiler states for free. The blog's "reasoning
+sandwich" reliability math assumes no ground-truth oracle; a compiler *is* one.
+**Rejected.** A `--verify` LLM-judge turn (weaker + costlier than the compiler/tests for code); a structured
+PEV phase-gate (couples to the rejected phase idea, D39).
+**Phase.** Built — prompt-only (`prompts/system.md`). Delivers D37 idea 9.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)
