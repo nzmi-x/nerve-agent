@@ -1,6 +1,6 @@
-// Read-only git for the TUI's location + git panels (D49). Pure parsers (unit-tested) + thin `Bun.spawn`
-// wrappers (like src/tools/bash.ts). ONLY read-only subcommands (status/branch/log) + a direct `.git/HEAD`
-// read; never a mutation. Off a repo → null/empty. Shape modeled on src/balance.ts (parse pure, run impure).
+// Read-only git for the TUI's location + git-graph panels (D49). Pure parsers (unit-tested) + thin
+// `Bun.spawn` wrappers (like src/tools/bash.ts). ONLY read-only subcommands (status/log) + a direct
+// `.git/HEAD` read; never a mutation. Off a repo → null/empty. Shape modeled on src/balance.ts.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -9,14 +9,12 @@ export interface GitStatus {
   ahead: number;
   behind: number;
 }
-export interface GitBranch {
-  name: string;
-  current: boolean;
-}
-export interface GitCommit {
+/** One row of `git log --graph` output: the topology `rail` (│ ● ╲ ╱ …) + a commit (hash/subject) when the
+ *  row is a commit, or just the rail on a connector line (`hash === ""`). */
+export interface GraphRow {
+  rail: string;
   hash: string;
   subject: string;
-  ageMs: number;
 }
 
 /** The nearest `.git` (dir or worktree file) walking up from `cwd`, else null. */
@@ -54,23 +52,15 @@ export function parseStatus(out: string): GitStatus {
   };
 }
 
-/** Parse `git branch` → {name, current}; skips a "(HEAD detached …)" line. */
-export function parseBranches(out: string): GitBranch[] {
+/** Parse `git log --graph … --pretty=format:%x00%h%x00%s`: the rail is everything before the first NUL;
+ *  a commit row then carries hash + subject, a connector row (no NUL) is rail-only. */
+export function parseGraph(out: string): GraphRow[] {
   return out
     .split("\n")
-    .filter((l) => l.trim() !== "")
-    .map((l) => ({ current: l.startsWith("*"), name: l.replace(/^[*+]?\s*/, "").trim() }))
-    .filter((b) => !b.name.startsWith("("));
-}
-
-/** Parse `git log --pretty=format:%h%x00%s%x00%ct` (NUL-separated) → commits with age. */
-export function parseLog(out: string, now = Date.now()): GitCommit[] {
-  return out
-    .split("\n")
-    .filter((l) => l.includes("\x00"))
+    .filter((l) => l !== "")
     .map((l) => {
-      const [hash, subject, ct] = l.split("\x00");
-      return { hash: hash ?? "", subject: subject ?? "", ageMs: Math.max(0, now - Number(ct) * 1000) };
+      const parts = l.split("\x00");
+      return parts.length >= 3 ? { rail: parts[0]!, hash: parts[1]!, subject: parts.slice(2).join("") } : { rail: l, hash: "", subject: "" };
     });
 }
 
@@ -90,9 +80,9 @@ export async function gitStatus(cwd: string): Promise<GitStatus | null> {
   if (!gitDir(cwd)) return null;
   return parseStatus(await git(cwd, ["status", "-sb"]));
 }
-export async function gitBranches(cwd: string): Promise<GitBranch[]> {
-  return parseBranches(await git(cwd, ["branch"]));
-}
-export async function gitLog(cwd: string, n = 12): Promise<GitCommit[]> {
-  return parseLog(await git(cwd, ["log", `-${n}`, "--pretty=format:%h%x00%s%x00%ct"]));
+
+/** Recent commits across **all** branches as a topology graph (`git log --graph --all`) — shows how branches
+ *  relate + each subject, newest first, capped to `n`. */
+export async function gitGraph(cwd: string, n = 24): Promise<GraphRow[]> {
+  return parseGraph(await git(cwd, ["log", "--graph", "--all", `-${n}`, "--color=never", "--pretty=format:%x00%h%x00%s"]));
 }

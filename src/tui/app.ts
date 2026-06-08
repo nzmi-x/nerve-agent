@@ -30,8 +30,8 @@ import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
 import { nestedMemory } from "../context.ts";
-import { lineDiff, diffStat } from "../diff.ts";
-import { gitBranch, gitStatus, gitBranches, gitLog, type GitStatus, type GitBranch, type GitCommit } from "../git.ts";
+import { diffRows, diffStat } from "../diff.ts";
+import { gitBranch, gitStatus, gitGraph, type GitStatus, type GraphRow } from "../git.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel } from "./format.ts";
@@ -112,7 +112,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   let echoGuard: string | null = null;
   let prevInput = ""; // last input text — diffed in onContentChange to make paste tokens atomic on delete (#3)
   let bottomView: "files" | "git" = "files"; // D49: which panel fills the bottom sidebar slot — Ctrl+G toggles
-  let gitData: { branch: string | null; status: GitStatus | null; branches: GitBranch[]; log: GitCommit[] } = { branch: null, status: null, branches: [], log: [] };
+  let gitData: { branch: string | null; status: GitStatus | null; graph: GraphRow[] } = { branch: null, status: null, graph: [] };
   // Long/multi-line pastes collapse to a "[Pasted N lines #id]" token at the cursor (so they don't flood
   // the box). Each paste is stashed under a unique id and substituted back **by id** on send. Deleting any
   // character of a token removes the WHOLE token (atomic — `dropBrokenPaste` in onContentChange), so it's
@@ -302,8 +302,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       gitDirty: gitData.status?.dirty,
       ahead: gitData.status?.ahead,
       behind: gitData.status?.behind,
-      gitBranches: gitData.branches,
-      gitLog: gitData.log,
+      gitGraph: gitData.graph,
       bottomView,
       todos: currentTodos,
       termHeight: renderer.height,
@@ -314,8 +313,8 @@ export async function runTui(opts: TuiOptions): Promise<void> {
   async function refreshGit(): Promise<void> {
     const branch = gitBranch(cwd);
     const status = await gitStatus(cwd);
-    const [branches, log] = bottomView === "git" ? await Promise.all([gitBranches(cwd), gitLog(cwd, 14)]) : [gitData.branches, gitData.log];
-    gitData = { branch, status, branches, log };
+    const graph = bottomView === "git" ? await gitGraph(cwd, 24) : gitData.graph; // graph only while the view is open
+    gitData = { branch, status, graph };
     renderSidebar();
   }
   // Subagent lifecycle (D6) → the subagents panel. Pushed on start, flipped on end.
@@ -963,13 +962,27 @@ export async function runTui(opts: TuiOptions): Promise<void> {
     const renderEditDiff = (path: string, oldText: string, newText: string): void => {
       const rp = path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
       const { added, removed } = diffStat(oldText, newText);
-      addText(() => t`${fg(theme.GREEN)("⎿")} ${fg(theme.CYAN)("✎")} ${fg(theme.MUTE)(rp)}  ${fg(theme.DIM)(added || removed ? `+${added} -${removed}` : "no change")}`);
-      const d = lineDiff(oldText, newText);
-      if (d) {
-        const md = addMarkdown();
-        md.content = `\`\`\`diff\n${d}\n\`\`\``;
-        md.streaming = false;
+      // filename header (bold path) + colored +a/-b stat
+      addText(
+        () =>
+          t`${fg(theme.GREEN)("⎿")} ${bold(fg(theme.CYAN)(`✎ ${rp}`))}  ${added ? fg(theme.GREEN)(`+${added}`) : ""}${added && removed ? " " : ""}${removed ? fg(theme.RED)(`-${removed}`) : ""}${!added && !removed ? fg(theme.DIM)("no change") : ""}`,
+      );
+      const rows = diffRows(oldText, newText);
+      const CAP = 80; // don't flood the transcript on a huge edit
+      for (const row of rows.slice(0, CAP)) {
+        if (row.tag === "⋯") {
+          addText(() => t`${fg(theme.DIM)("        ⋯")}`);
+          continue;
+        }
+        // green +, red -, dim context; each line prefixed with its (right-aligned) line number.
+        addText(() => {
+          const num = fg(theme.DIM)(String(row.n ?? "").padStart(4));
+          if (row.tag === "+") return t`${num} ${fg(theme.GREEN)(`+ ${row.text}`)}`;
+          if (row.tag === "-") return t`${num} ${fg(theme.RED)(`- ${row.text}`)}`;
+          return t`${num} ${fg(theme.MUTE)(`  ${row.text}`)}`;
+        });
       }
+      if (rows.length > CAP) addText(() => t`${fg(theme.DIM)(`        … ${rows.length - CAP} more lines`)}`);
       proseGap = true;
     };
     // D24: inject the active language packs' skills into the system prompt (cached); track this turn's edits.

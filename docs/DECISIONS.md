@@ -1201,14 +1201,14 @@ should see).
 1. **Location panel** (top of the sidebar): the working dir (starship-style `shortenPath`, `~` / `…/`) + git
    `⎇ branch · ● dirty · ↑ahead ↓behind`. `gitBranch` reads `.git/HEAD` directly (no subprocess).
 2. **Git view** (`Ctrl+G` / `/git`): the sidebar's bottom flex-grow slot **swaps `files` ↔ `git`** — a
-   branch/status header, local branches (current marked), and recent commits (hash + subject). A **toggle**
-   (files stays a keystroke away), not a permanent replace, and no overlay. Data via `gitStatus`/`gitBranches`/
-   `gitLog` (`git status -sb` / `branch` / `log`), cached in `app.ts` and refreshed at startup, after each
-   turn, and on Ctrl+G (branches/log only while the view is open — they're subprocesses).
+   a branch/status header + a `git log --graph --all` of how the branches relate (rail · hash · subject),
+   capped to the panel height. A **toggle** (files stays a keystroke away), not a permanent replace, no
+   overlay. Data via `gitStatus` + `gitGraph`, cached in `app.ts` and refreshed at startup, after each turn,
+   and on Ctrl+G (the graph only while the view is open — it's a subprocess).
 3. **Inline agent-edit diffs** (like Claude Code, **not** `git diff`): `edit`/`write` already hold old + new,
-   so they call a new `ctx.onFileChange(path, old, new)` display hook; the TUI renders `lineDiff(old, new)` (a
-   tiny zero-dep LCS line differ, `src/diff.ts`) as a syntax-highlighted ```diff block + a `✎ path +a -b`
-   line, replacing the verbose "Applied N edits" line **in the UI only**. The model's tool result (anchors +
+   so they call a new `ctx.onFileChange(path, old, new)` display hook; the TUI renders `diffRows(old, new)` (a
+   tiny zero-dep LCS line differ, `src/diff.ts`) as **colored, line-numbered +/- rows** under a bold filename
+   header, replacing the verbose "Applied N edits" line **in the UI only**. The model's tool result (anchors +
    diagnostics) is unchanged; the engine/loop is untouched (`onFileChange` is a ctx hook like `setTodos`/D6).
 **Why.** nerve surfaced *where you are*, the project's *git state*, and *what the agent changed* nowhere — the
 last especially (only a text "Applied N edits"). The user wanted a starship-like dir+branch, a glanceable git

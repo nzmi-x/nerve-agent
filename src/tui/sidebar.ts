@@ -9,7 +9,7 @@ import { relative } from "node:path";
 import { formatCost, formatContext } from "../usage.ts";
 import { formatBalance, type Balance } from "../balance.ts";
 import { trunc, shortenPath } from "./format.ts";
-import type { GitBranch, GitCommit } from "../git.ts";
+import type { GraphRow } from "../git.ts";
 import type { Theme } from "./theme.ts";
 import type { Mode } from "../dispatch.ts";
 import type { Todo } from "../tools/types.ts";
@@ -40,8 +40,7 @@ export interface SidebarState {
   gitDirty?: number; // changed-file count
   ahead?: number;
   behind?: number;
-  gitBranches?: GitBranch[]; // for the git view (Ctrl+G)
-  gitLog?: GitCommit[];
+  gitGraph?: GraphRow[]; // the git view's branch graph — `git log --graph` rows (Ctrl+G)
   bottomView: "files" | "git"; // which panel fills the bottom slot (D49)
   todos: Todo[];
   termHeight: number;
@@ -253,25 +252,24 @@ export function createSidebar(renderer: Renderer, theme: Theme): Sidebar {
     }
   }
 
-  // git panel (D49): branch/status header · local branches · recent commits (hash + subject).
+  // git panel (D49): branch/status header + a `git log --graph` of how branches relate (rail · hash ·
+  // subject), capped to the panel's visible height (a bordered box can't scroll, so we trim — like files).
   function renderGit(s: SidebarState): void {
     const rows: Content[] = [];
     const dirty = s.gitDirty ? fg(theme.YELLOW)(`●${s.gitDirty}`) : fg(theme.GREEN)("✓ clean");
     rows.push(t`${fg(theme.MAGENTA)("⎇")} ${fg(theme.FG)(trunc(s.branch ?? "—", W - 12))} ${dirty}${aheadBehind(s.ahead, s.behind)}`);
-    const branches = (s.gitBranches ?? []).slice(0, 5);
-    if (branches.length) {
-      rows.push(t`${fg(theme.DIM)("branches")}`);
-      for (const b of branches) rows.push(b.current ? t`${fg(theme.GREEN)("●")} ${fg(theme.FG)(trunc(b.name, W - 2))}` : t`${fg(theme.DIM)("○")} ${fg(theme.MUTE)(trunc(b.name, W - 2))}`);
+    const graph = s.gitGraph ?? [];
+    if (!graph.length) rows.push(t`${fg(theme.DIM)(s.branch ? "(no commits)" : "(not a git repo)")}`);
+    for (const r of graph) {
+      if (r.hash) rows.push(t`${fg(theme.MAGENTA)(r.rail)}${fg(theme.YELLOW)(r.hash)} ${fg(theme.FG)(trunc(r.subject, Math.max(4, W - r.rail.length - r.hash.length - 1)))}`);
+      else rows.push(t`${fg(theme.MAGENTA)(r.rail.replace(/\s+$/, ""))}`); // connector line (rail only)
     }
-    const log = s.gitLog ?? [];
-    if (log.length) {
-      rows.push(t`${fg(theme.DIM)("commits")}`);
-      for (const c of log) rows.push(t`${fg(theme.YELLOW)(c.hash)} ${fg(theme.FG)(trunc(c.subject, Math.max(4, W - c.hash.length - 1)))}`);
-    }
-    if (!s.branch && !log.length) rows.push(t`${fg(theme.DIM)("(not a git repo)")}`);
+    const usedAbove = cwdPanel.height + sessionPanel.height + todosPanel.height + skillsPanel.height + lspPanel.height + toolsPanel.height + subagentsPanel.height + 2;
+    const cap = Math.max(1, Math.min(GIT_ROWS, s.termHeight - usedAbove));
     for (let i = 0; i < gitRows.length; i++) {
-      gitRows[i]!.content = i < rows.length ? rows[i]! : "";
-      gitRows[i]!.height = i < rows.length ? 1 : 0;
+      const show = i < Math.min(rows.length, cap);
+      gitRows[i]!.content = show ? rows[i]! : "";
+      gitRows[i]!.height = show ? 1 : 0;
     }
   }
 

@@ -1,11 +1,18 @@
 // A tiny, zero-dep line differ for **display** (D49): show what the agent changed, like Claude Code's
-// inline edit diffs. NOT sent to the model — `edit`/`write` still return their concise text result; this
-// only paints the +/- for the human. Pure + unit-tested. Common prefix/suffix is trimmed before the LCS so
-// localized edits (the common case) are cheap.
+// inline edit diffs — colored +/- with line numbers. NOT sent to the model; `edit`/`write` still return
+// their concise text result, this only paints for the human. Pure + unit-tested. Common prefix/suffix is
+// trimmed before the LCS so localized edits (the common case) are cheap.
 
 export interface DiffStat {
   added: number;
   removed: number;
+}
+/** One rendered diff row. `tag` " " context · "+" added · "-" removed · "⋯" collapsed gap. `n` is the line
+ *  number to show (new-file line for context/added, old-file line for removed; null for a "⋯" row). */
+export interface DiffRow {
+  tag: " " | "+" | "-" | "⋯";
+  n: number | null;
+  text: string;
 }
 
 type Op = [" " | "-" | "+", string];
@@ -56,23 +63,31 @@ export function diffStat(oldText: string, newText: string): DiffStat {
 }
 
 /**
- * A compact unified-style diff: changed lines (`+`/`-`) with up to `context` unchanged lines around each
- * hunk; far-away unchanged regions collapse to a single `⋯`. Returns "" when the texts are identical.
- * Render as a ```diff block (syntax-highlighted) or themed +/- rows.
+ * Structured diff rows for display: changed lines (`+`/`-`) with line numbers and up to `context` unchanged
+ * lines around each hunk; far-away unchanged regions collapse to one `⋯` row. Returns `[]` when identical.
+ * The caller paints each row (green/red/dim) — see `renderEditDiff` in app.ts.
  */
-export function lineDiff(oldText: string, newText: string, context = 3): string {
+export function diffRows(oldText: string, newText: string, context = 3): DiffRow[] {
   const ops = diffOps(splitLines(oldText), splitLines(newText));
-  if (!ops.some(([tag]) => tag !== " ")) return "";
-  const keep = new Array<boolean>(ops.length).fill(false);
-  for (let i = 0; i < ops.length; i++) {
-    if (ops[i]![0] === " ") continue;
-    for (let j = Math.max(0, i - context); j <= Math.min(ops.length - 1, i + context); j++) keep[j] = true;
+  if (!ops.some(([tag]) => tag !== " ")) return [];
+  let oldNo = 0;
+  let newNo = 0;
+  const numbered: DiffRow[] = ops.map(([tag, text]) => {
+    if (tag === "-") return { tag, n: ++oldNo, text };
+    if (tag === "+") return { tag, n: ++newNo, text };
+    (oldNo++, newNo++);
+    return { tag: " ", n: newNo, text };
+  });
+  const keep = new Array<boolean>(numbered.length).fill(false);
+  for (let i = 0; i < numbered.length; i++) {
+    if (numbered[i]!.tag === " ") continue;
+    for (let j = Math.max(0, i - context); j <= Math.min(numbered.length - 1, i + context); j++) keep[j] = true;
   }
-  const out: string[] = [];
+  const out: DiffRow[] = [];
   let gap = false;
-  for (let i = 0; i < ops.length; i++) {
-    if (keep[i]) (out.push(ops[i]![0] + ops[i]![1]), (gap = false));
-    else if (!gap) (out.push("⋯"), (gap = true));
+  for (let i = 0; i < numbered.length; i++) {
+    if (keep[i]) (out.push(numbered[i]!), (gap = false));
+    else if (!gap) (out.push({ tag: "⋯", n: null, text: "" }), (gap = true));
   }
-  return out.join("\n");
+  return out;
 }

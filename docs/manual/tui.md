@@ -40,7 +40,7 @@ with `@`/`!`/`/` affordances + an interactive `ask_user` picker) plus a collapsi
   this session + status `●`/`✓`/`✗`, fed by the loop's `onToolStart`/`onToolResult`), **subagents** (this
   session's `task` runs + status `●`/`✓`/`✗`, [D6](../DECISIONS.md)), and a bottom flex-grow slot that
   **`Ctrl+G` swaps between files ↔ git** ([D49](../DECISIONS.md)): **files** (touched files, most-recent
-  first; `✎` written, `·` read-only) or **git** (branch/status header, local branches, recent commits). All use the same
+  first; `✎` written, `·` read-only) or **git** (branch/status header + a `git log --graph` of how branches relate). All use the same
   fixed-pool-of-rows pattern as the todo panel; each compact panel keeps a **`(none …)` placeholder** when
   empty (so it never collapses to a thin border), and the files pool is height-capped (subtracting the other
   panels) so it never overflows. **`Ctrl+B`** toggles the sidebar; it **auto-hides below 100 cols** (guarded
