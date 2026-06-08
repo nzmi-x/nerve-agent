@@ -1,6 +1,6 @@
 # DECISIONS.md
 
-Standing record of the design decisions behind `nerve`, captured from a deliberate
+Standing record of the design decisions behind **Nerve Agent** (CLI `nerve`), captured from a deliberate
 grilling session. Each entry states the decision, why it won, and what was rejected — so the
 reasoning survives and isn't re-litigated. New decisions append here; reversals edit the
 relevant entry and say so. ADR-lite, no ceremony.
@@ -487,10 +487,11 @@ so they aren't re-proposed without new information:
 - **opencode "Context Epochs"** (inject mid-conversation system messages when effective state — date,
   model — changes, preserving the provider cache prefix) — *note only.* Elegant and relevant to our
   replay concerns, but a sophisticated abstraction; not worth its weight yet.
-- **Hard-rejected (charter violations):** MCP, plugin marketplaces, multi-agent coordinators/teams,
+- **Hard-rejected (charter violations):** MCP, ACP, A2A, plugin marketplaces, multi-agent coordinators/teams,
   voice, remote agents, IDE bridge, x402 payments, auto-dream. These are exactly the "provider
   zoo / generic framework" bloat the [README](../README.md) and [AGENT_RULES](AGENT_RULES.md) reject.
-  Not deferred — **out of scope by design.**
+  Not deferred — **out of scope by design** (and by personal need: a solo, two-provider harness simply
+  doesn't reach for cross-tool/cross-agent protocols like MCP/ACP/A2A — fork it if you ever do).
 **Why.** Recording the *no*s (with reasons) is as load-bearing as the *yes*es — it stops a future
 session (human or nerve) from re-litigating settled scope.
 

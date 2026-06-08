@@ -1,6 +1,6 @@
 # AGENT_RULES.md
 
-The constitution of `nerve`. These rules bind both the human author and any LLM operating
+The constitution of **Nerve Agent** (CLI `nerve`). These rules bind both the human author and any LLM operating
 inside the harness. When a change conflicts with a rule here, the rule wins — or the rule
 gets edited first, deliberately, in its own commit. Nothing here is incidental.
 

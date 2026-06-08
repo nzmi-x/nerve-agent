@@ -1,63 +1,53 @@
 # Nerve Agent
 
-A bespoke, single-developer AI agent harness. Lean enough to hold in your head, transparent enough that the agent running *inside* it can safely refactor its own machinery mid-session.
+**A personal, single-developer coding-agent harness.** Lean enough to hold in your head, transparent enough that the agent running *inside* it can safely refactor its own machinery mid-session.
 
-> **Nerve Agent** — because the whole point is to *feel every token* as it streams, and to splice into the wire mid-thought. (The CLI command stays `nerve`.)
+> The CLI command is `nerve`. The "nerve" is the point: a synchronous, per-delta interceptor pipeline that lets you *feel every token* as it streams and splice into the wire mid-thought.
 
-## What this is (and isn't)
+## This is a personal harness, not a product
 
-- **Not** a `claude-code` / `opencode` clone. No generic framework, no plugin marketplace, no provider zoo.
-- **A personal coding agent.** Operates on the dir you launch it in — reads, edits, runs shell, iterates on code.
-- **Self-hackable above all.** Every part is small, flat, and obvious so that a human *or the LLM in the loop* can **hot-swap a tool or an interceptor at runtime** (`/reload`, no restart) without spelunking. Launched inside this repo, the agent can edit its own harness.
-- **Two providers, hardcoded:** **Google Gemini** and **DeepSeek**. Nothing else. No Anthropic, no OpenAI, no OpenRouter, no LangChain. The absence of an aggregator layer is a feature.
-- **Bun-native, strict TypeScript, ESM only.** Zero legacy Node bloat.
-- **OpenTUI** ([`@opentui/core`](https://github.com/sst/opentui)) for the terminal UI — imperative core API, no React layer unless a screen earns it.
+I built this for **me** — my workflow, my taste, my two model providers. It is not a framework, not a startup, not something I maintain for users. No roadmap, no support, no stability promise, and plenty of opinionated choices you may disagree with.
 
-If an abstraction doesn't pay rent today, it isn't here. The *why* of every choice lives in
-[AGENT_RULES.md](docs/AGENT_RULES.md); the *what* (with rejected alternatives) in [DECISIONS.md](docs/DECISIONS.md).
+**But it's public and MIT-licensed, so take it.** Fork it, rip out what you don't like, and make it *your own* nerve agent. The whole thing is deliberately small and flat so that's genuinely easy. If something here is useful to you, great; if you bend it into something better for yourself, even better. I just won't be running it as a project — issues and PRs may sit unanswered.
 
-## Defining features
+## What it is
 
-- **The "nerve":** a synchronous, per-delta **interceptor pipeline** — splice into the model's
-  output between tokens to observe, rewrite, drop, or `abort()` mid-stream. Ships with token-tap,
-  live stop-guard, reasoning router, and secret redaction.
-- **Hashline editing:** the only edit path. `read` tags each line `LINE#HASH:content`; edits point
-  at hash anchors instead of retyping lines (fewer tokens), and a stale read is hard-rejected
-  before it can corrupt a file. Zero deps (`Bun.hash`).
-- **Two human-controlled modes:** **PLAN** (read-only — read tools + obviously-safe bash) and
-  **EDIT** (everything auto). Switched only by you (`Shift+Tab`); the model can't escalate.
-- **Hot-swap seams:** reload tools + interceptors live without losing the conversation.
-- **Resumable sessions:** append-only JSONL transcripts you can replay and grep.
-- **LSP code intelligence:** a raw, zero-dep Language Server client. `edit`/`write`/`read` append
-  diagnostics so the agent self-corrects, and an `lsp` tool gives it definition/references/hover/
-  symbols (read-only, so it works in PLAN mode). Seeded for TypeScript. *(Phase 2.)*
-- **Claude-compatible:** loads `CLAUDE.md` (layered from `~/.claude` + project `./.claude` + root)
-  into the system prompt, and discovers skills from `~/.claude/skills` + `./.claude/skills` — so your
-  existing Claude ecosystem (like the bundled `opentui` skill) just works.
-- **Self-documenting:** a `manual` tool serves nerve's own operator manual (`docs/manual/`) — the
-  agent reads "how X works / how to change X" before it touches X. The OpenTUI API is federated in
-  lazily (`manual("opentui")`), so our only dependency's docs cost context only when the UI is touched.
+A terminal coding agent for **Google Gemini** and **DeepSeek** — nothing else, on purpose. It works in the directory you launch it in: reads, edits, runs shell, iterates on code. Launched inside its own repo (or via the `self:` path prefix from anywhere), it can edit its own tools, prompts, and docs *while running*.
+
+The guiding constraint: **if an abstraction doesn't pay rent *for me* today, it isn't here.** No MCP, no ACP, no A2A, no plugin marketplace, no provider aggregator, no multi-agent swarm — not because they're wrong, but because I haven't needed them. If you do, that's exactly what the fork button is for. The *why* of every choice lives in [DECISIONS.md](docs/DECISIONS.md).
+
+## What makes it itself
+
+- **The "nerve" — a mid-stream interceptor pipeline.** A synchronous, per-delta hook into the model's output: observe, rewrite, drop, or `abort()` *between tokens*. Ships with a token-tap, a live stop-guard, a reasoning router, and secret redaction.
+- **Hashline editing — the only edit path.** `read` tags each line `LINE#HASH:content`; edits point at hash anchors instead of retyping lines (fewer tokens), and a stale read is hard-rejected before it can corrupt a file. Zero deps (`Bun.hash`).
+- **Two human-controlled modes.** **PLAN** (read-only — read tools + obviously-safe bash) and **EDIT** (everything auto). Switched only by you (`Shift+Tab`); the model can't escalate its own permissions.
+- **Self-hackable at runtime.** Tools and interceptors hot-swap live (`/reload`, no restart, conversation preserved); the system prompt is re-read each turn. The agent can rewrite its own harness and reload it.
+- **Filesystem-discovered tools.** Drop a `Tool`-shaped file in `src/tools/` and it's registered — no wiring — and `/reload` picks it up live.
+- **LSP code intelligence.** A raw, zero-dep Language Server client: `read`/`write`/`edit` append diagnostics so the agent self-corrects, and an `lsp` tool gives it definitions/references/hover/symbols (read-only, usable in PLAN).
+- **Claude- / agents.md-compatible.** Loads `CLAUDE.md` + `AGENTS.md` as project memory (layered across the nerve/claude/agent ecosystem dirs, with the nearest file in your tree taking precedence), and discovers skills + slash-commands the same way — so an existing setup mostly just works.
+- **SQLite-persisted, resumable sessions.** A per-project database under `~/.nerve`; `--resume last` picks up where you left off.
+- **Self-documenting.** A `manual` tool serves the operator manual in `docs/manual/` — the agent reads "how X works / how to change X" before it touches X.
 
 ## Quick start
 
+Needs [Bun](https://bun.sh) and an API key for at least one provider.
+
 ```bash
 bun install
-bun run dev          # bun --watch index.ts (restarts the TUI on change)
-bun test             # bun:test
-bun run typecheck    # tsc --noEmit
+bun run dev          # bun --watch index.ts — runs the TUI, restarts on change
+bun run build        # installs a `nerve` launcher to ~/.local/bin (a shim, not a compiled binary)
 ```
 
-Configure keys and models — **keys in `.env`** (Bun loads it automatically — no dotenv),
-**models in `config/models.json`** (schema-backed, so you get IntelliSense + validation while editing):
+Keys live in `.env` (gitignored; Bun loads it automatically — no dotenv). Models live in a committed, schema-backed catalog:
 
 ```sh
-# .env  (gitignored)
+# .env
 GEMINI_API_KEY=...
 DEEPSEEK_API_KEY=...
 ```
 
 ```jsonc
-// config/models.json  (committed catalog — no secrets). The $schema ref drives editor IntelliSense.
+// config/models.json  (committed; no secrets). The $schema ref drives editor IntelliSense.
 {
   "$schema": "./models.schema.json",
   "models": [
@@ -67,64 +57,42 @@ DEEPSEEK_API_KEY=...
 }
 ```
 
-## Proposed directory map (flat by design)
+State lives under **`~/.nerve`** (never inside your project), namespaced per project — so the repos you work in stay clean. Override the root with `$NERVE_HOME`.
 
-Phase 0 (this commit) establishes only context + config. Phase 1 fills `src/`. The target shape:
+## Layout
+
+Small files with one job each; relative imports only, no barrels or `utils/` junk drawer.
 
 ```
-nerve/
-├── index.ts             # boot: wire config → loop → TUI; --resume <id>|last
-├── README.md
-├── CLAUDE.md            # tiny: `@.claude/CLAUDE.md` import so Claude Code still loads the guide
-├── .env                 # GEMINI_API_KEY / DEEPSEEK_API_KEY (gitignored)
-├── .claude/             # Claude-compatible: CLAUDE.md + skills/ (also read by nerve at runtime)
-│   ├── CLAUDE.md        # operational guide for agents working on this repo
-│   └── skills/
-├── config/             # committed runtime config (no secrets), $schema-backed for IntelliSense
-│   ├── models.json      #   model catalog (id, provider, label, default)
-│   ├── models.schema.json
-│   ├── lsp.json         #   LSP server catalog (extensions → command)
-│   └── lsp.schema.json
-├── docs/                # design docs (read order: ARCHITECTURE_BRIEF → AGENT_RULES → DECISIONS)
-│   ├── ARCHITECTURE_BRIEF.md
-│   ├── AGENT_RULES.md
-│   ├── DECISIONS.md
-│   ├── providers.md     #   verified DeepSeek + Gemini wire spec
-│   └── manual/          #   operator manual served by the `manual` tool (per-subsystem how-to-change)
-├── prompts/
-│   └── system.md        # the agent's system prompt — read fresh per turn (hot-swappable)
-├── src/
-│   ├── loop.ts          # pure, re-entrant agent loop (one turn = stream → tools → repeat)
-│   ├── session.ts       # conversation state + append-only JSONL persistence
-│   ├── stream.ts        # SSE line parser + the synchronous interceptor pipeline (the "nerve")
-│   ├── interceptors.ts  # v1: token-tap, stop-guard, reasoning-router, secret-redaction (hot-swappable)
-│   ├── dispatch.ts      # tool dispatcher + PLAN/EDIT mode gate (human-only switch)
-│   ├── hashline.ts      # LINE#HASH anchoring via Bun.hash (powers read + edit)
-│   ├── lsp/             # raw JSON-RPC LSP client (client.ts) + manager (index.ts) — Phase 2
-│   ├── config.ts        # loads .env keys + config/models.json + config/lsp.json; active profile
-│   ├── context.ts       # Claude-compat: discover + layer CLAUDE.md and skills (~/.claude + ./.claude)
-│   ├── providers/
-│   │   ├── types.ts     # StreamEvent union + Provider interface (the contract)
-│   │   ├── gemini.ts    # raw Gemini streamGenerateContent client → StreamEvent
-│   │   └── deepseek.ts  # raw DeepSeek (OpenAI-shaped) client → StreamEvent
-│   ├── tools/           # one file per tool + registry.ts (read, write, edit, bash, grep, glob, ls, manual)
-│   │   └── registry.ts
-│   └── tui/
-│       └── app.ts       # OpenTUI views: transcript, streaming md/diff, reasoning fold, status line
-├── tests/               # bun:test, colocated by concern
-└── src/paths.ts         # global-state layout (D22) — nerve writes NOTHING into the project dir
+index.ts            boot: config → loop → TUI (or headless `-p "…"`, `--resume last`)
+prompts/system.md   the agent's system prompt, re-read each turn (hot-swappable)
+config/             committed model + LSP catalogs ($schema-backed)
+src/
+  loop.ts           pure, re-entrant agent turn loop
+  stream.ts         SSE parse + the synchronous interceptor pipeline (the "nerve")
+  interceptors.ts   token-tap, stop-guard, reasoning-router, secret-redaction (hot-swappable)
+  dispatch.ts       tool dispatch + the PLAN/EDIT mode gate (human-only)
+  hashline.ts       LINE#HASH anchoring via Bun.hash (powers read + edit)
+  session.ts        conversation state + bun:sqlite persistence
+  context.ts        loads CLAUDE.md / AGENTS.md as project memory
+  providers/        raw Gemini + DeepSeek streaming clients → a normalized StreamEvent
+  tools/            one file per tool, filesystem-discovered by registry.ts
+  lsp/              raw JSON-RPC Language Server client (zero deps)
+  tui/              the OpenTUI terminal UI
+docs/               design docs + the manual/ served by the `manual` tool
 ```
 
-State lives under **`~/.nerve`** (not the project), namespaced like `~/.claude/projects` (D22):
-`~/.nerve/projects/<cwd with / → ->/sessions/<id>.jsonl` for transcripts, plus global + per-project
-`skills/` and `commands/`. So contribution repos stay clean. Override the root with `$NERVE_HOME`.
+## Docs
 
-No barrels, no `utils/` junk drawer, no path aliases — relative imports keep the graph legible.
+- [docs/DECISIONS.md](docs/DECISIONS.md) — the standing decision log: every choice, why it won, and what it beat. The best map of *why this is the way it is.*
+- [docs/ARCHITECTURE_BRIEF.md](docs/ARCHITECTURE_BRIEF.md) — how the pieces fit (streaming, interception, hashline, modes, hot-swap, persistence).
+- [docs/AGENT_RULES.md](docs/AGENT_RULES.md) — the non-negotiables (anti-redundancy, self-hackability, the human-only safety boundaries, the two-provider scope).
+- [docs/providers.md](docs/providers.md) — the verified DeepSeek + Gemini wire spec, mapped to `StreamEvent`.
 
-## Documents
+## Built with
 
-- [docs/ARCHITECTURE_BRIEF.md](docs/ARCHITECTURE_BRIEF.md) — the streaming model, the normalized event contract, mid-token interception, hashline editing, modes, hot-swap, persistence, the local execution path.
-- [docs/providers.md](docs/providers.md) — verified DeepSeek + Gemini wire spec (endpoints, streaming chunks, tool calls, thinking) mapped to `StreamEvent`. Ground truth for the provider clients.
-- [docs/DECISIONS.md](docs/DECISIONS.md) — the standing decision log: every choice, its rationale, and the alternatives it beat.
-- [docs/AGENT_RULES.md](docs/AGENT_RULES.md) — anti-redundancy mandate, self-hackability rules, the human-only safety boundaries, the strict two-provider scope.
-- [.claude/CLAUDE.md](.claude/CLAUDE.md) — operational guidelines for an agent working *on* this repo (loaded via the root `CLAUDE.md` import).
+[Bun](https://bun.sh) (runtime, test runner, sqlite, shell), strict TypeScript, ESM only, and [OpenTUI](https://github.com/sst/opentui) for the terminal UI. No other runtime dependencies of note — the absence of an aggregator/framework layer is a feature.
+
+## License
+
+[MIT](LICENSE) © 2026 Nazmi Maizan. Fork freely; make it your own.

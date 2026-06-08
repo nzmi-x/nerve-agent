@@ -1,6 +1,6 @@
 # ARCHITECTURE_BRIEF.md
 
-A minimalist architecture for `nerve` — a single-developer **coding agent** for **Gemini** and
+A minimalist architecture for **Nerve Agent** (CLI `nerve`) — a single-developer **coding agent** for **Gemini** and
 **DeepSeek** only. The whole system is one Bun process: an event loop pulls a token stream from a
 provider, runs every chunk through a synchronous interceptor pipeline (the "nerve"), dispatches
 tool calls locally under a human-controlled permission mode, and paints the result with OpenTUI.
