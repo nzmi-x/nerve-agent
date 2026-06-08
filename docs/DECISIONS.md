@@ -1155,6 +1155,24 @@ transcript line on queue (would split the live stream — the status `↳N queue
 ESC clears it). TUI-only (headless is one-shot). Interactive flow is typecheck- + load-verified and patterned
 on D34; not unit-tested (TUI policy, like D34). Delivers D37 idea 6.
 
+## D47 — Unified discovery roots: a 6-dir ecosystem ladder (+ personal per-project)
+**Decision.** Skills, commands, and (D48) project memory discover from one ordered set of dirs, **most-
+authoritative first**: the out-of-tree **personal per-project** dir (`~/.nerve/projects/<slug>`, D22/D31) on
+top, then the ecosystem ladder — **nerve > claude > agent**, and within each **project (in-tree `.x`) over user
+(`~/.x`)**: `.nerve, ~/.nerve, .claude, ~/.claude, .agent, ~/.agent`. `paths.ts` `ecosystemDirs(cwd)` is the
+single source; `skillRoots`/`commandRoots` map `/skills`/`/commands` onto it. Callers dedup **first-wins**
+(skills/commands); memory reverses for layering (D48).
+**Why.** The old roots were nerve+claude only, in a mixed order; the user wanted a consistent priority across
+the three agent ecosystems (nerve native; claude + the `agents.md` `.agent` convention as compat), with the
+repo's committed config (`.x`) overriding the user's global (`~/.x`) — standard "most-specific wins" — and a
+project's in-tree `.nerve`/`.agent` now readable (reading committed config doesn't violate D22, which is about
+*writing* state into the repo). nerve's global respects `$NERVE_HOME`; claude/agent use the real home.
+**Rejected.** Scope-primary order (all project dirs, then all user dirs — the user grouped by ecosystem, so
+ecosystem is primary); dropping the out-of-tree personal per-project tier (it's the most-specific override and
+where state lives, D31); user-global-wins (the user confirmed project overrides user).
+**Phase.** Built. `ecosystemDirs`/`skillRoots`/`commandRoots` in `src/paths.ts`; tests in `tests/paths.test.ts`.
+Project memory uses the same ladder in D48.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

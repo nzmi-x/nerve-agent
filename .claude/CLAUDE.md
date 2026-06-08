@@ -42,8 +42,8 @@ just drops a launcher that runs the repo's `index.ts`, so hot-reload + prompt ho
 - Any config field you add must be reflected in its `*.schema.json` so the IntelliSense stays honest.
 - **System prompt** is `prompts/system.md`, read fresh each turn (so it hot-swaps).
 - **Claude-compat ([D12](../docs/DECISIONS.md)):** nerve discovers skills + slash-commands from the
-  `skillRoots`/`commandRoots` (`src/paths.ts`; `~/.claude` + `./.claude` + `~/.nerve`, [D22](../docs/DECISIONS.md))
-  — **built**. Layering project-memory files (`CLAUDE.md`/`AGENTS.md`) into the system prompt is **built**
+  `skillRoots`/`commandRoots` (`src/paths.ts` `ecosystemDirs` — the nerve/claude/agent ladder, project over
+  user, [D47](../docs/DECISIONS.md)) — **built**. Layering project-memory files (`CLAUDE.md`/`AGENTS.md`) into the system prompt is **built**
   ([D42](../docs/DECISIONS.md)): `src/context.ts` `loadProjectMemory` + `baseSystem` in `index.ts`, resolving
   line-level `@imports`. nerve's own guide lives at `.claude/CLAUDE.md` (root `CLAUDE.md` is just an
   `@.claude/CLAUDE.md` import so both Claude Code and nerve load it).

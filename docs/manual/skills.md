@@ -8,9 +8,10 @@ Invocation is wired in `src/tui/app.ts` (`invokeSkill`). Tests: `tests/affordanc
 
 **How it works:**
 - A skill is a folder with a `SKILL.md` whose YAML frontmatter has `name` + `description`.
-- On startup nerve discovers skills from the `skillRoots` ([D22](../DECISIONS.md), most-specific first,
-  dedup first-wins): `~/.nerve/projects/<slug>/skills` → `./.claude/skills` → `~/.nerve/skills` →
-  `~/.claude/skills`. Only each skill's **name + description** (and the `SKILL.md` path) sit in context —
+- On startup nerve discovers skills from the `skillRoots` ([D47](../DECISIONS.md), most-authoritative first,
+  dedup first-wins): the ecosystem ladder — `~/.nerve/projects/<slug>/skills` (personal per-project) → then
+  **nerve > claude > agent**, project over user (`.nerve` → `~/.nerve` → `.claude` → `~/.claude` → `.agent` →
+  `~/.agent`, each `/skills`). Only each skill's **name + description** (and the `SKILL.md` path) sit in context —
   the body isn't read until invoked (**progressive disclosure**).
 - **Invoking** `/<skill> [args]` ([D12](../DECISIONS.md)): `loadSkillBody` reads the `SKILL.md`,
   strips frontmatter, `expandCommand` substitutes args (like a slash command, [D16](../DECISIONS.md)),

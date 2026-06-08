@@ -19,24 +19,32 @@ export function projectDir(cwd: string = process.cwd()): string {
   return join(nerveHome(), "projects", projectSlug(cwd));
 }
 
-/** Skill discovery roots, most-specific first (callers dedup first-wins). Claude dirs + nerve dirs. */
-export function skillRoots(cwd: string = process.cwd()): string[] {
+/**
+ * Config-discovery dirs for a project, MOST-authoritative first — callers dedup first-wins (skills/commands);
+ * memory reverses this for layering (D47/D48). Order: the out-of-tree personal per-project dir (D22/D31) on
+ * top, then the ecosystem ladder — **nerve > claude > agent**, and within each **project (in-tree `.x`) over
+ * user (`~/.x`)**. nerve's global dir respects `$NERVE_HOME` (`nerveHome()`); claude/agent use the real home.
+ */
+export function ecosystemDirs(cwd: string = process.cwd()): string[] {
   return [
-    join(projectDir(cwd), "skills"), // ~/.nerve/projects/<slug>/skills (project)
-    join(cwd, ".claude/skills"), // ./.claude/skills (project, Claude-compat)
-    join(nerveHome(), "skills"), // ~/.nerve/skills (global)
-    join(homedir(), ".claude/skills"), // ~/.claude/skills (user, Claude-compat)
+    projectDir(cwd), // ~/.nerve/projects/<slug> — personal per-project (out-of-tree, D22)
+    join(cwd, ".nerve"), // ./.nerve — committed per-project (nerve)
+    nerveHome(), // ~/.nerve — user global (nerve)
+    join(cwd, ".claude"), // ./.claude — committed per-project (claude-compat)
+    join(homedir(), ".claude"), // ~/.claude — user global (claude-compat)
+    join(cwd, ".agent"), // ./.agent — committed per-project (agent-compat)
+    join(homedir(), ".agent"), // ~/.agent — user global (agent-compat)
   ];
 }
 
-/** Markdown slash-command roots (D16), most-specific first. */
+/** Skill discovery roots, most-authoritative first (callers dedup first-wins) — the ecosystem ladder (D47). */
+export function skillRoots(cwd: string = process.cwd()): string[] {
+  return ecosystemDirs(cwd).map((d) => join(d, "skills"));
+}
+
+/** Markdown slash-command roots (D16), most-authoritative first — the ecosystem ladder (D47). */
 export function commandRoots(cwd: string = process.cwd()): string[] {
-  return [
-    join(projectDir(cwd), "commands"), // ~/.nerve/projects/<slug>/commands
-    join(cwd, ".claude/commands"), // ./.claude/commands (project, Claude-compat)
-    join(nerveHome(), "commands"), // ~/.nerve/commands (global)
-    join(homedir(), ".claude/commands"), // ~/.claude/commands (user, Claude-compat)
-  ];
+  return ecosystemDirs(cwd).map((d) => join(d, "commands"));
 }
 
 /** Absolute root of nerve's OWN source tree (the repo it runs from). The agent self-hacks here via the
