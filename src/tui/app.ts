@@ -29,6 +29,7 @@ import { parseAffordance, atSuggestions, slashSuggestions, parseSlash, applyAtSu
 import { expandCommand, type Command } from "../commands.ts";
 import { pickCutPoint, pruneToolOutputs, summarize } from "../compaction.ts";
 import { activePacks, activeSkillNames, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "../langpack.ts";
+import { nestedMemory } from "../context.ts";
 import { listSessions, lastSessionId, sessionExists, deleteSession } from "../sessions.ts";
 import { pickTheme, buildSyntaxStyle } from "./theme.ts";
 import { firstLine, trunc, rel } from "./format.ts";
@@ -920,7 +921,7 @@ export async function runTui(opts: TuiOptions): Promise<void> {
       langSkillText = await langSkills(packs);
       langSkillKey = key;
     }
-    const sys = [system, await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
+    const sys = [system, nestedMemory(cwd, langTouched), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
     const edited = new Set<string>();
     const ac = new AbortController();
     turnAbort = ac;

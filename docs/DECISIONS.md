@@ -1173,6 +1173,28 @@ where state lives, D31); user-global-wins (the user confirmed project overrides 
 **Phase.** Built. `ecosystemDirs`/`skillRoots`/`commandRoots` in `src/paths.ts`; tests in `tests/paths.test.ts`.
 Project memory uses the same ladder in D48.
 
+## D48 — Recursive project memory: touched-ancestor CLAUDE.md / AGENTS.md
+**Decision.** Beyond the base memory (D42, now layered over the D47 ecosystem ladder), nerve loads **nested**
+`**/CLAUDE.md` and `**/AGENTS.md` — **touched-driven**, not an eager whole-tree scan: per turn,
+`nestedMemory(cwd, touched)` walks the ancestor dirs (strictly below cwd) of every file the agent has
+read/edited this session and loads each one's CLAUDE.md/AGENTS.md, **shallow→deep** (most-specific last). It
+reuses the touched-file set the language packs already track (D24). Wired into the per-turn `sys` assembly in
+both surfaces, right after the base memory.
+**Why.** A subdir's CLAUDE.md should apply when you work in that subdir (Claude Code's nearest-CLAUDE.md
+semantics) — but eagerly concatenating a monorepo's every memory file would bloat the prompt with guidance for
+subtrees you never touch. Touched-ancestor gives the right scope at the right cost: the file's local rules
+surface exactly when relevant. Like the language-pack injection (D24) it's part of the prefix, so it only
+shifts the cache the turn a *new* subtree is first touched.
+**Also (D47 fold-in).** Base memory now layers over `ecosystemDirs` reversed (least→most authoritative) + the
+project-root files; and an `@import` whose target is **already loaded** resolves to nothing (not a stray
+literal), so nerve's own root `CLAUDE.md` (`@.claude/CLAUDE.md`) stays clean whether `.claude` loads via the
+ecosystem ladder or the import. A *missing* `@import` target is still kept visible (a broken import the user
+should see).
+**Rejected.** Eager `**/CLAUDE.md` load (monorepo prompt bloat; loads irrelevant subtrees); per-file-touch
+*replacement* of memory (the touched set is sticky + additive, like D24, so memory only grows).
+**Phase.** Built. `loadProjectMemory` + `nestedMemory` in `src/context.ts`; per-turn wiring in `index.ts` +
+`src/tui/app.ts`; tests in `tests/context.test.ts`. Delivers the user's `**/CLAUDE.md` `**/AGENTS.md` request.
+
 ---
 
 ## Standing micro-defaults (low-risk, stated so they're not guessed)

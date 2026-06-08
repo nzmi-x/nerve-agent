@@ -1,17 +1,21 @@
 # context
 
-**Status:** built (D42, delivering [D12](../DECISIONS.md)) — loads `CLAUDE.md` + `AGENTS.md` as agent context.
+**Status:** built (D42/D47/D48, delivering [D12](../DECISIONS.md)) — loads `CLAUDE.md` + `AGENTS.md` as context.
 **What:** project/user memory layered onto the system prompt so nerve reads the repo's own guidance.
-**Code:** `src/context.ts` (`loadProjectMemory`) · folded in by `baseSystem()` in `index.ts`
-(tests: `tests/context.test.ts`)
+**Code:** `src/context.ts` (`loadProjectMemory` + `nestedMemory`) · folded into `sys` via `baseSystem()` +
+`nestedMemory()` in `index.ts` / `src/tui/app.ts` (tests: `tests/context.test.ts`)
 
 **How it works:**
-- Sources, most-general → most-specific (project augments user, [D12](../DECISIONS.md)):
-  `~/.claude/CLAUDE.md` → `./CLAUDE.md` → `./.claude/CLAUDE.md` → `./AGENTS.md`. Each loads at most once.
+- **Base** (`loadProjectMemory`, once) — the ecosystem dirs ([`ecosystemDirs`, D47](../DECISIONS.md)) reversed
+  to least→most authoritative, each contributing its `CLAUDE.md`/`AGENTS.md`, then the project-root files
+  (`./CLAUDE.md`, `./AGENTS.md`) last. Project (`.x`) over user (`~/.x`); nerve > claude > agent.
+- **Nested** (`nestedMemory`, per turn, [D48](../DECISIONS.md)) — `**/CLAUDE.md` / `**/AGENTS.md`,
+  **touched-driven**: for files the agent has read/edited, load their ancestor dirs' memory (strictly below
+  cwd), shallow→deep. Claude Code's nearest-CLAUDE.md semantics without an eager whole-tree scan; reuses the
+  D24 touched set. Part of the prefix, so a *new* subtree only shifts the cache the turn it's first touched.
 - A line that is exactly `@<path>` is **inlined** (recursively, depth + cycle guarded) — nerve's own root
-  `CLAUDE.md` is just `@.claude/CLAUDE.md`. A missing/cyclic/already-seen target leaves the line untouched.
-- **Whole-file injection** — no structured-section parsing or phase-injection ([D37](../DECISIONS.md)
-  rejected those). The base system prompt = `prompts/system.md` **+** the loaded memory.
-- Read fresh each turn in headless (an edited memory file hot-swaps); the TUI computes it once at startup.
+  `CLAUDE.md` is just `@.claude/CLAUDE.md`. Missing target → kept visible; already-included → dropped.
+- **Whole-file injection** — no structured-section parsing/phase-injection ([D37](../DECISIONS.md)). Each file
+  loads at most once. Base read fresh per turn in headless (edited memory hot-swaps); the TUI computes base once.
 
-**See:** [DECISIONS D42/D12](../DECISIONS.md) · [skills](skills.md) · [tools](tools.md)
+**See:** [DECISIONS D42/D47/D48/D12](../DECISIONS.md) · [skills](skills.md) · [tools](tools.md)

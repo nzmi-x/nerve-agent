@@ -7,7 +7,7 @@ import { loadModels, providerFor, selectModel, fallbacksFor } from "./src/config
 import { Session } from "./src/session.ts";
 import { lastSessionId } from "./src/sessions.ts";
 import { ensureLayout, skillRoots, commandRoots } from "./src/paths.ts";
-import { loadProjectMemory } from "./src/context.ts";
+import { loadProjectMemory, nestedMemory } from "./src/context.ts";
 import { activePacks, defaultSkills, langForFile, langSkills, runHooks, triagePrompt } from "./src/langpack.ts";
 import { loop, type Candidate } from "./src/loop.ts";
 import { reasoningRouter, secretRedaction, tokenTap } from "./src/interceptors.ts";
@@ -94,7 +94,7 @@ async function runTurn(session: Session, entryId: string, thinking: boolean, tem
     langSkillText = await langSkills(packs);
     langSkillKey = key;
   }
-  const sys = [baseSystem(process.cwd()), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
+  const sys = [baseSystem(process.cwd()), nestedMemory(process.cwd(), langTouched), await defaultSkills(), mode === "plan" ? PLAN_NOTE : "", packs.length ? langSkillText : ""].filter(Boolean).join("\n\n");
   await loop({
     provider,
     session,
