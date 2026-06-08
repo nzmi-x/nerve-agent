@@ -55,6 +55,32 @@ test("planBashAllowed: non-allowlisted programs are refused", () => {
   }
 });
 
+test("planBashAllowed: find's full read-only syntax passes (grouping, prune, printf, ls)", () => {
+  for (const c of [
+    "find . -type f -name '*.ts'",
+    "find . \\( -name a -o -name b \\)", // grouping — was blocked by the generic metachar gate
+    "find src -path '*/node_modules/*' -prune -o -name '*.ts' -print",
+    "find . -name '*.md' -printf '%p\\n'", // -printf writes to stdout (read-only), not a file
+    "find . -maxdepth 2 -type d -ls",
+  ]) {
+    expect(planBashAllowed(c).ok).toBe(true);
+  }
+});
+
+test("planBashAllowed: find's command-running / file-writing actions and chaining stay blocked", () => {
+  for (const c of [
+    "find . -name '*.ts' -exec rm {} \\;", // runs a command
+    "find . -exec grep foo {} +", // even a read-only exec — can't verify what runs
+    "find . -execdir sh -c 'x' \\;",
+    "find . -name x -delete", // deletes
+    "find . -fprintf out.txt '%p'", // writes a file
+    "find . -name '*.ts' | head", // chaining
+    "find . -type f > out.txt", // redirection
+  ]) {
+    expect(planBashAllowed(c).ok).toBe(false);
+  }
+});
+
 // --- dangerousCommand (D18 destructive guard) -------------------------------
 
 test("dangerousCommand: catastrophic patterns are refused", () => {

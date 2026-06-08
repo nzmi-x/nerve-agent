@@ -13,6 +13,11 @@
 - `planBashAllowed(command)`: rejects any shell **metacharacter** (`< > | ; & $ \` ( ) { }` newline),
   then requires the program to be an obviously-safe read-only one (`SAFE_PROGRAMS`), with `git`
   limited to read-only subcommands (`SAFE_GIT`: log/diff/status/show/blame/…, never commit/add/push/…).
+- `find` gets a **tailored gate** (`findAllowed`): its grouping `\( … \)` and `-exec` placeholder `{}` need
+  `()`/`{}`, which the generic metachar set forbids — so `find` is allowed those two, still forbidden the
+  chaining/redirection/substitution chars (`< > | ; & $ \`` newline, so nothing reaches command position),
+  and refused if it uses a command-running / file-writing primary (`-exec`/`-execdir`/`-ok`/`-okdir`/
+  `-delete`/`-fprint`/`-fprintf`/`-fls`). Read-only search (name/type/path/prune/printf/ls) passes.
 - `dispatch(name, args, mode, ctx)` resolves the tool from the registry, gates it, runs it, and
   returns the result — or `Refused (MODE): …` / `Error: …`. It never throws and never mutates the mode.
 - **`PLAN_NOTE` (prompt-level, not authority).** In PLAN, the surfaces append `PLAN_NOTE` to the system

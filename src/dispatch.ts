@@ -25,7 +25,7 @@ const METACHAR = /[<>|;&$`(){}\n\r]/;
 // Obviously read-only programs. A program whose name alone can't mutate (no in-arg write flags).
 // Deliberately conservative: anything not here is refused in PLAN — build a tool or switch to EDIT.
 const SAFE_PROGRAMS = new Set([
-  "ls", "cat", "head", "tail", "wc", "nl", "tac", "find", "tree", "pwd", "echo", "printf",
+  "ls", "cat", "head", "tail", "wc", "nl", "tac", "tree", "pwd", "echo", "printf", // `find` has its own gate (findAllowed)
   "rg", "grep", "egrep", "fgrep", "fd", "stat", "file", "du", "df", "realpath", "readlink",
   "basename", "dirname", "which", "type", "whoami", "id", "hostname", "uname", "date",
   "env", "printenv", "sort", "uniq", "cut", "column", "comm", "diff", "cmp", "jq", "bat",
@@ -71,13 +71,29 @@ export function dangerousCommand(command: string): Decision {
   return { ok: true };
 }
 
+// find(1) is read-only, but its grouping `\( … \)` and the `-exec` placeholder `{}` trip the generic
+// metachar gate, so a perfectly safe `find` search gets refused in PLAN. Give it a tailored gate: still
+// forbid the chars that chain / redirect / substitute to ANOTHER command (so nothing reaches command
+// position — only `()` `{}` are extra-allowed over the generic set), and forbid find's own primaries that
+// RUN a command or WRITE a file. Everything else find does (name/type/path/size/prune/printf/ls…) is read-only.
+const FIND_CHAIN = /[<>|;&$`\n\r]/; // chaining / redirection / substitution — never allowed
+const FIND_MUTATORS = /(^|\s)-(execdir|exec|okdir|ok|delete|fprintf|fprint|fls)\b/; // run-a-command / write-a-file actions
+
+/** PLAN gate for `find` — read-only search is fine; chaining and `-exec`/`-delete`/`-fprint` are not. */
+export function findAllowed(cmd: string): Decision {
+  if (FIND_CHAIN.test(cmd)) return { ok: false, reason: "chaining/redirection isn't allowed in PLAN mode" };
+  if (FIND_MUTATORS.test(cmd)) return { ok: false, reason: "find's -exec/-delete/-fprint actions run or write — blocked in PLAN (read-only)" };
+  return { ok: true };
+}
+
 /** Is this a `bash` command obviously safe to run in PLAN mode? */
 export function planBashAllowed(command: string): Decision {
   const cmd = command.trim();
   if (cmd === "") return { ok: false, reason: "empty command" };
-  if (METACHAR.test(cmd)) return { ok: false, reason: "shell metacharacters aren't allowed in PLAN mode" };
   const tokens = cmd.split(/\s+/);
   const prog = tokens[0]!;
+  if (prog === "find") return findAllowed(cmd); // tailored gate — its `()` `{}` grouping needs more than the generic set
+  if (METACHAR.test(cmd)) return { ok: false, reason: "shell metacharacters aren't allowed in PLAN mode" };
   if (prog === "git") {
     const sub = tokens[1] ?? "";
     return SAFE_GIT.has(sub)
